@@ -1,0 +1,5 @@
+<div class="chat {{ 'chat-end' if role == 'user' else 'chat-start' }}">
+    <div class="chat-bubble {{ 'chat-bubble-primary' if role == 'user' else '' }}">
+        {{ content }}
+    </div>
+</div>

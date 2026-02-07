@@ -1,0 +1,126 @@
+[project]
+name = "agentdeck"
+version = "0.8.0"
+description = "Server for remote access to coding agents on local machine"
+requires-python = ">=3.13"
+dependencies = [
+    "pydantic>=2.10,<3",
+    "python-dotenv>=1.0,<2",
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.32,<1",
+    "pydantic-settings>=2.7,<3",
+    "structlog>=24.4,<26",
+    "libtmux>=0.37,<1",
+    "jinja2>=3.1,<4",
+    "pyyaml>=6.0,<7",
+]
+
+
+[dependency-groups]
+dev = [
+    "pytest >= 8.3.0",
+    "pytest-dotenv >= 0.5.2",
+    "pytest-mock >= 3.14",
+    "pytest-cov >= 6.1",
+    "pytest-asyncio>=0.24,<1",
+    "pytest-timeout>=2.4.0",
+    "pre-commit >= 4.0.1",
+    "ruff>=0.14.10",
+    "ty>=0.0.14",
+    "httpx>=0.27,<1",
+    "pytest-profiling>=1.8.1",
+    "pytest-xdist>=3.5,<4",
+    "deptry>=0.24.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentdeck"]
+
+[tool.uv]
+managed = true
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+testpaths = ["tests"]
+pythonpath = ["."]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+env_files = [".env"]
+timeout = 180
+timeout_method = "signal"
+asyncio_default_fixture_loop_scope="function"
+markers = [
+    "integration: real Claude session tests (run with -m integration)",
+]
+
+[tool.coverage.run]
+source = ["."]
+omit = [
+    "tests/*",
+]
+
+# see ruff configuration options at
+# https://docs.astral.sh/ruff/configuration/
+
+[tool.ruff]
+line-length = 92
+indent-width = 4
+exclude = [
+    ".git",
+    "__pycache__",
+    "venv",
+    ".venv",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "W",
+    "C",
+    "I",
+    "A",
+    "B",
+    "S",
+    "UP",
+] # Enable checks for PEP8, imports, bugbear, security, and pyupgrade rules
+ignore = ["E203", "E266", "S101", "S108"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S311"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.deptry.per_rule_ignores]
+DEP002 = [
+    "python-dotenv",  # loaded via pydantic-settings
+    "uvicorn",        # ASGI server, run as CLI
+    "jinja2",         # used by FastAPI/Starlette templates
+    "pyyaml",         # used by shortcuts config loader
+]
+DEP003 = [
+    "agentdeck",  # self-imports
+    "starlette",       # re-exported by FastAPI
+    "markupsafe",      # re-exported by Jinja2
+]
+
+[tool.ty]
+
+[tool.ty.src]
+include = [
+    "agentdeck",
+    "scripts",
+    "tests"
+]
+
+[tool.ty.rules]
+unused-ignore-comment = "warn"
+possibly-missing-import = "error"
+redundant-cast = "ignore"
+unresolved-import = "error"

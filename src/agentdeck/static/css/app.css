@@ -1,0 +1,72 @@
+.terminal-pre {
+    font-family: "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
+    font-size: 11px;
+    line-height: 1.4;
+    tab-size: 8;
+    overflow-wrap: break-word;
+}
+
+/* Horizontal rules inside terminal output */
+.terminal-hr {
+    border: none;
+    border-top: 1px solid oklch(var(--bc) / 0.2);
+    margin: 0;
+}
+
+/* Tables from box-drawing conversion */
+.terminal-table {
+    max-width: 100%;
+    border-collapse: collapse;
+    font-size: inherit;
+    font-family: inherit;
+    margin: 0.5rem 0;
+}
+.terminal-table th,
+.terminal-table td {
+    padding: 0.25rem 0.5rem;
+    border: 1px solid oklch(var(--bc) / 0.15);
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: break-word;
+}
+.terminal-table th {
+    font-weight: 600;
+    background: oklch(var(--b2));
+}
+
+/* Panels from box-drawing conversion */
+.terminal-panel {
+    border: 1px solid oklch(var(--bc) / 0.2);
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    margin: 0.5rem 0;
+    white-space: pre-wrap;
+}
+
+/* Auto-scroll terminal to bottom */
+#terminal-container {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Multiline input: scroll when capped at max-height */
+form textarea.textarea {
+    overflow-y: auto;
+}
+
+/* History scrollback zone */
+.history-sentinel {
+    min-height: 1px;
+}
+
+.history-chunk {
+    border-bottom: 1px solid oklch(var(--bc) / 0.08);
+}
+
+/* Mobile-friendly touch targets */
+@media (max-width: 640px) {
+    .btn-sm {
+        min-height: 2.5rem;
+        min-width: 3rem;
+    }
+}
