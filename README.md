@@ -31,8 +31,7 @@ uv run uvicorn agentdeck.main:app --host 0.0.0.0 --port 8000
 Point your browser or your mobile phone to `http://<local_ip>:8000`, tap **New Session**, pick a working
 directory, and start talking to your agent.
 
-<!-- screenshot placeholder -->
-<!-- ![screenshot](docs/screenshot.png) -->
+![screenshot](docs/agentdec_screenshot.png)
 
 ## How it works
  
