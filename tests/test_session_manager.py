@@ -52,7 +52,7 @@ async def test_create_session(manager, tmp_path):
         working_dir=str(tmp_path),
         agent_type=AgentType.CLAUDE,
     )
-    assert info.session_id == f"agent-{tmp_path.name[:20].lower()}"
+    assert info.session_id == f"agent-claude-{tmp_path.name[:20].lower()}"
     assert info.working_dir == str(tmp_path)
     assert info.agent_type == AgentType.CLAUDE
 
@@ -67,19 +67,25 @@ async def test_create_session_bad_dir(manager):
 async def test_create_session_same_dir_suffix(manager, tmp_path):
     first = await manager.create_session(str(tmp_path))
     second = await manager.create_session(str(tmp_path))
-    assert first.session_id == f"agent-{tmp_path.name[:20].lower()}"
-    assert second.session_id == f"agent-{tmp_path.name[:20].lower()}-2"
+    assert first.session_id == f"agent-claude-{tmp_path.name[:20].lower()}"
+    assert second.session_id == f"agent-claude-{tmp_path.name[:20].lower()}-2"
 
 
 @pytest.mark.asyncio
 async def test_send_input_text(manager, mock_tmux, tmp_path):
     info = await manager.create_session(str(tmp_path))
     await manager.send_input(info.session_id, "explain this")
-    mock_tmux.send_keys.assert_called_with(
-        info.session_id,
-        "explain this",
-        enter=True,
-        literal=True,
+    calls = mock_tmux.send_keys.call_args_list
+    # Text sent without enter, then Enter sent separately
+    text_call = calls[-2]
+    assert text_call == (
+        (info.session_id, "explain this"),
+        {"enter": False, "literal": True},
+    )
+    enter_call = calls[-1]
+    assert enter_call == (
+        (info.session_id, "Enter"),
+        {"enter": False},
     )
 
 

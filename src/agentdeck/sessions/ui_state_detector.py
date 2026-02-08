@@ -18,25 +18,49 @@ _HRULE_RE = re.compile(r"^[\s]*[─]{3,}[\s]*$")
 # Matches: "Enter to select · ↑/↓ to navigate · Esc to cancel"
 # Also matches: "Enter to confirm · Esc to cancel" (trust prompt)
 # Also matches: "Esc to cancel · Tab to amend" (permission prompt)
+# Also matches: "Press enter to continue" (Codex selection)
 _FOOTER_RE = re.compile(
     r"(Enter to (select|confirm)|Esc to cancel)"
-    r".*(Esc to cancel|Tab to amend|↑/↓)",
+    r".*(Esc to cancel|Tab to amend|↑/↓)"
+    r"|Press enter to continue",
     re.IGNORECASE,
 )
 
 # Freeform indicator — Claude uses "Type something" for free input
 _FREEFORM_HINT = "type something"
 
-# Whimsical verb: "✳ Moonwalking… (thought for 3s)"
-_SPINNER_VERB_RE = re.compile(r"^\s*\S\s+[A-Z][a-z]+ing…")
-# System status: "⠋ compacting conversation…"
-_SPINNER_COMPACT_RE = re.compile(r"^\s*\S\s+[Cc]ompacting conversation…")
+# Known spinner characters used by Claude Code status lines.
+# Captured empirically — see scripts/capture_spinners.py
+_SPINNER_CHARS = "·⏺✢✳✶✻✽"
 
-# Performance evaluation prompt
-_PERF_EVAL_RE = re.compile(r"0:\s*bad\s+1:\s*fair\s+2:\s*good")
+# Status line: spinner char + space + text containing …
+# Examples: "✳ Moonwalking…", "⏺ Reading 1 file…",
+#           "+ Renaming Foo across codebase…"
+_SPINNER_RE = re.compile(rf"^\s*[{_SPINNER_CHARS}]\s+.*\u2026")
 
-# How many lines from the bottom to search for spinner/perf
+# Codex working line: "• Working (0s • esc to interrupt)"
+_CODEX_WORKING_RE = re.compile(r"^\s*•\s+.*\(\d+s\s*•\s*esc to interrupt\)")
+
+# Quality survey: "1: Bad  2: Fine  3: Good  0: Dismiss"
+_SURVEY_RE = re.compile(r"\d:\s*Good\s+0:\s*Dismiss", re.IGNORECASE)
+
+# How many lines from the bottom to search for spinner/perf.
 _BOTTOM_LINES = 5
+
+# Agent chrome lines found at the bottom of the pane.
+# Matched lines are stripped alongside blank lines so
+# proximity checks see actual content, not agent chrome.
+#   "? for shortcuts"
+#   "82% context left"
+#   "shift+tab to cycle"
+#   "› some placeholder"  (input prompt cursor)
+_CHROME_RE = re.compile(
+    r"\?\s+for\s+shortcuts"
+    r"|\d+%\s+context left"
+    r"|shift\+tab to cycle"
+    r"|^\s*[›❯]\s+\S",
+    re.IGNORECASE,
+)
 
 
 class UIStateDetector:
@@ -52,9 +76,9 @@ class UIStateDetector:
         """
         lines = raw.split("\n")
 
-        # Strip trailing blank lines so position checks use
-        # actual content bottom, not tmux pane padding.
-        while lines and not lines[-1].strip():
+        # Strip trailing blank lines and agent status-bar
+        # chrome so position checks use actual content bottom.
+        while lines and (not lines[-1].strip() or _CHROME_RE.search(lines[-1])):
             lines.pop()
 
         working = self._try_working(lines)
@@ -75,19 +99,19 @@ class UIStateDetector:
         """
         tail = lines[-_BOTTOM_LINES:]
 
-        # Check for performance eval first
+        # Check for quality survey — auto-dismiss
         for line in tail:
-            if _PERF_EVAL_RE.search(line):
+            if _SURVEY_RE.search(line):
                 return ParsedOutput(
                     state=UIState.WORKING,
-                    auto_response="2",
+                    auto_response="0",
                 )
 
-        # Check for spinner line
+        # Check for spinner line (Claude or Codex)
         for line in tail:
-            if _SPINNER_VERB_RE.match(line):
+            if _SPINNER_RE.match(line):
                 return ParsedOutput(state=UIState.WORKING)
-            if _SPINNER_COMPACT_RE.match(line):
+            if _CODEX_WORKING_RE.match(line):
                 return ParsedOutput(state=UIState.WORKING)
 
         return None
@@ -211,7 +235,7 @@ class UIStateDetector:
             line = lines[k].strip()
             if not line:
                 continue
-            if line.endswith("?"):
+            if line.endswith(("?", ":")):
                 has_question = True
                 break
 
@@ -238,5 +262,6 @@ class UIStateDetector:
             state=UIState.SELECTION,
             items=items,
             selected_index=selected_index,
+            arrow_navigable=has_marker,
             question=" ".join(question_lines),
         )

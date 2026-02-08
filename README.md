@@ -2,7 +2,7 @@
 
 Your coding agents don't stop working just because you left your desk.
 This is a lightweight server that lets you monitor and interact with
-AI coding agents (Claude Code, etc.) running on your dev machine —
+AI coding agents (Claude Code, Codex, etc.) running on your dev machine —
 from your phone, tablet, or that questionable airport WiFi.
 
 Because sometimes you need to approve a file edit while waiting for
@@ -10,20 +10,19 @@ your coffee.
 
 ## Quick start
 
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
+and at least one coding agent:
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code/overview)
+- [Codex](https://github.com/openai/codex)
+
 ```bash
-#
-# 1. install tmux 
+# 1. install tmux
 # macOS
 brew install tmux
 # (Debian/Ubuntu)
 sudo apt install -y tmux
 
-
-# 2. install Claude Code and log in
-curl -fsSL https://claude.ai/install.sh | sh
-# run claude and login to your account
-
-# 3. install agentdeck and start server
+# 2. install agentdeck and start server
 uv sync
 uv run uvicorn agentdeck.main:app --host 0.0.0.0 --port 8000
 ```
@@ -66,20 +65,14 @@ with Zero Trust access policies. You get HTTPS, authentication, and
 DDoS protection without adding a single line of auth code. Your
 server never exposes a port to the internet.
 
-```
-  Your Phone                 Cloudflare Tunnel            Your Server
- ┌──────────┐              ┌─────────────────┐          ┌──────────-────┐
- │ Browser  │── HTTPS ────►│  Zero Trust     │── HTTP ─►│ agentdeck     │
- │          │              │  (auth + tunnel)│          │   :8000       │
- └──────────┘              └─────────────────┘          │               │
-                                                        │   ┌────────┐  │
-                                                        │   │ tmux   │  │
-                                                        │   │sessions│  │
-                                                        │   │        │  │
-                                                        │   │ agent-1│  │
-                                                        │   │ agent-2│  │
-                                                        │   └────────┘  │
-                                                        └───-───────────┘
+```mermaid
+flowchart LR
+    Phone["Your Phone<br/>(Browser)"]
+    CF["Cloudflare Tunnel<br/>Zero Trust<br/>(auth + HTTPS)"]
+    AD["agentdeck :8000"]
+    TM["tmux sessions<br/>agent-claude<br/>agent-codex"]
+
+    Phone -- HTTPS --> CF -- HTTP --> AD --> TM
 ```
 
 ## Tech stack

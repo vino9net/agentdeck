@@ -9,6 +9,7 @@ class AgentType(StrEnum):
     """Supported coding agent types."""
 
     CLAUDE = "claude"
+    CODEX = "codex"
 
 
 class SessionCreate(BaseModel):
@@ -84,6 +85,10 @@ class ParsedOutput(BaseModel):
     question: str = Field(
         default="",
         description="Question text above the selection list",
+    )
+    arrow_navigable: bool = Field(
+        default=True,
+        description="Selection has ›/❯ marker — use arrows",
     )
     auto_response: str | None = Field(
         default=None,

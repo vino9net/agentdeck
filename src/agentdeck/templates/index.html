@@ -82,14 +82,20 @@
                                     <option :value="dir"></option>
                                 </template>
                             </datalist>
-                            <label class="label">
-                                <span class="label-text">Name</span>
-                            </label>
                             <div class="flex items-center gap-2 mb-2">
+                                <span class="label-text flex-shrink-0">Agent</span>
+                                <select x-model="newAgentType"
+                                        class="select select-sm select-bordered flex-1">
+                                    <option value="claude">Claude</option>
+                                    <option value="codex">Codex</option>
+                                </select>
+                            </div>
+                            <div class="flex items-center gap-2 mb-2">
+                                <span class="label-text flex-shrink-0">Name</span>
                                 <span class="text-xs text-base-content/70">agent-</span>
                                 <input type="text"
                                        x-model="newTitle"
-                                       class="input input-sm input-bordered w-full">
+                                       class="input input-sm input-bordered flex-1">
                             </div>
                             <button type="submit" class="btn btn-sm btn-primary w-full">
                                 New Session
@@ -305,7 +311,7 @@
                       @input="$el.style.height='auto';$el.style.height=$el.scrollHeight+'px'"></textarea>
             <button type="button"
                     class="btn btn-primary btn-sm btn-square"
-                    :disabled="!connected || !inputText.trim()"
+                    :disabled="!connected || !inputText.trim() || uiState === 'working'"
                     @click="sendMessage()">
                 <svg class="w-4 h-4" fill="none"
                      stroke="currentColor" viewBox="0 0 24 24">

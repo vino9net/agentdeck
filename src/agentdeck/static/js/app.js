@@ -9,6 +9,7 @@ document.addEventListener("alpine:init", () => {
     recentDirs: [],
     newTitle: "",
     newWorkingDir: "",
+    newAgentType: "claude",
     recognition: null,
     uiState: "working",
     selectionItems: [],
@@ -205,6 +206,7 @@ document.addEventListener("alpine:init", () => {
         body: JSON.stringify({
           working_dir: dir,
           title: title || null,
+          agent_type: this.newAgentType,
         }),
       });
       if (resp.ok) {
@@ -213,6 +215,7 @@ document.addEventListener("alpine:init", () => {
         this.switchSession(session.session_id);
         this.newWorkingDir = "";
         this.newTitle = "";
+        this.newAgentType = "claude";
         this.refreshSessions();
         this.refreshRecentDirs();
       } else {
@@ -236,6 +239,7 @@ document.addEventListener("alpine:init", () => {
       this.activeSession = null;
       this.$nextTick(() => {
         this.activeSession = sessionId;
+        this.refreshSlashCommands();
         this.$nextTick(() => {
           this.loadHistory(sessionId, null);
           this._setupHistoryObserver();
@@ -337,9 +341,11 @@ document.addEventListener("alpine:init", () => {
     },
 
     async refreshSlashCommands() {
-      const resp = await fetch(
-        "/api/v1/sessions/slash-commands"
-      );
+      const sid = this.activeSession;
+      const url = sid
+        ? `/api/v1/sessions/slash-commands?session_id=${sid}`
+        : "/api/v1/sessions/slash-commands";
+      const resp = await fetch(url);
       if (!resp.ok) return;
       this.slashCommands = await resp.json();
     },

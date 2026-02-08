@@ -22,6 +22,7 @@ from agentdeck.sessions.agent_output_log import (
 from agentdeck.sessions.manager import (
     SessionManager,
 )
+from agentdeck.sessions.models import AgentType
 from agentdeck.sessions.tmux_backend import (
     TmuxBackend,
 )
@@ -29,6 +30,14 @@ from agentdeck.sessions.tmux_backend import (
 logger = structlog.get_logger()
 
 _POLL_RE = re.compile(r"/api/v1/sessions/[^/]+/output")
+
+
+def _infer_agent_type(session_id: str) -> AgentType:
+    """Infer agent type from session ID prefix."""
+    for t in AgentType:
+        if session_id.startswith(f"agent-{t.value}-"):
+            return t
+    return AgentType.CLAUDE
 
 
 class _SamplePollingAccess(logging.Filter):
@@ -111,9 +120,11 @@ async def lifespan(
         if not session_id.startswith("agent-"):
             continue
         working_dir = await asyncio.to_thread(tmux.get_session_path, session_id)
+        agent_type = _infer_agent_type(session_id)
         mgr.register_existing_session(
             session_id=session_id,
             working_dir=(working_dir or settings.default_working_dir),
+            agent_type=agent_type,
         )
         live_ids.add(session_id)
 

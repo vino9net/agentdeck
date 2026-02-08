@@ -28,6 +28,16 @@ templates: Jinja2Templates | None = None
 
 _HRULE_RE = re.compile(r"^[\s]*[─]{3,}[\s]*$")
 
+# Status-bar tokens right-aligned with long space runs; collapse them.
+#   "? for shortcuts"
+#   "82% context left"
+#   "shift+tab to cycle"
+_STATUS_BAR_RE = re.compile(
+    r"\s{3,}(\?\s+for\s+shortcuts"
+    r"|\d+% context left"
+    r"|shift\+tab to cycle)"
+)
+
 # Box-drawing detection patterns
 _TABLE_TOP_RE = re.compile(r"^[│┌][─┬]+[┐│]?\s*$")
 _TABLE_SEP_RE = re.compile(r"^[│├][─┼]+[┤│]?\s*$")
@@ -153,7 +163,10 @@ def _convert_blocks(lines: list[str]) -> list[str]:
         if _HRULE_RE.match(line):
             result.append('<hr class="terminal-hr">')
         else:
-            result.append(html.escape(line))
+            escaped = html.escape(line)
+            # Collapse long space runs before status-bar tokens
+            escaped = _STATUS_BAR_RE.sub(r"  \1", escaped)
+            result.append(escaped)
         i += 1
 
     return result
@@ -197,12 +210,15 @@ async def list_sessions(
 @router.get("/slash-commands")
 async def list_slash_commands(
     request: Request,
+    session_id: str | None = None,
 ) -> list[dict[str, object]]:
-    """List slash commands for the current agent."""
+    """List slash commands for the session's agent."""
     mgr = _mgr(request)
+    agent = mgr._get_agent(session_id) if session_id else None
+    commands = agent.slash_commands if agent else []
     return [
         {"text": text, "enter": enter, "confirm": confirm}
-        for text, enter, confirm in mgr._agent.slash_commands
+        for text, enter, confirm in commands
     ]
 
 
@@ -267,6 +283,7 @@ async def debug_session(
     """Spawn a debug session to analyze the current session."""
     mgr = _mgr(request)
     try:
+        original = await mgr.get_session(session_id)
         output = await mgr.capture_output(session_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -281,6 +298,7 @@ async def debug_session(
         new_session.session_id,
         body.description,
         output.content,
+        original.agent_type,
     )
     return new_session
 

@@ -8,7 +8,9 @@ from pathlib import Path
 
 import structlog
 
+from agentdeck.agents.base import BaseAgent
 from agentdeck.agents.claude_code import ClaudeCodeAgent
+from agentdeck.agents.codex import CodexAgent
 from agentdeck.sessions.agent_output_log import AgentOutputLog
 from agentdeck.sessions.models import (
     AgentType,
@@ -24,8 +26,9 @@ from agentdeck.sessions.ui_state_detector import UIStateDetector
 
 logger = structlog.get_logger()
 
-AGENT_REGISTRY: dict[AgentType, type[ClaudeCodeAgent]] = {
+AGENT_REGISTRY: dict[AgentType, type[BaseAgent]] = {
     AgentType.CLAUDE: ClaudeCodeAgent,
+    AgentType.CODEX: CodexAgent,
 }
 
 
@@ -44,7 +47,7 @@ class SessionManager:
         capture_tail_lines: int = 300,
     ) -> None:
         self._tmux = tmux
-        self._agent = ClaudeCodeAgent()
+        self._agents: dict[str, BaseAgent] = {}
         self._sessions: dict[str, SessionInfo] = {}
         self._last_output: dict[str, str] = {}
         self._recent_dirs_path = recent_dirs_path
@@ -84,14 +87,13 @@ class SessionManager:
                 working_dir=str(path),
             )
 
-        agent_cls = AGENT_REGISTRY.get(agent_type, ClaudeCodeAgent)
+        agent_cls = AGENT_REGISTRY.get(agent_type)
         if agent_cls is None:
             msg = f"Unsupported agent: {agent_type}"
             raise ValueError(msg)
 
-        agent_type = AgentType.CLAUDE
         agent = agent_cls()
-        session_id = self._build_session_id(path, title)
+        session_id = self._build_session_id(path, title, agent_type)
         command = agent.launch_command(str(path))
 
         await asyncio.to_thread(
@@ -106,6 +108,7 @@ class SessionManager:
             working_dir=str(path),
         )
         self._sessions[session_id] = info
+        self._agents[session_id] = agent
         await asyncio.to_thread(self._record_recent_dir, str(path))
         return info
 
@@ -121,7 +124,8 @@ class SessionManager:
         """
         self._require_alive_session(session_id)
 
-        expanded = self._agent.expand_shortcut(text)
+        agent = self._get_agent(session_id)
+        expanded = agent.expand_shortcut(text)
         if expanded is not None:
             keys, enter = expanded
             logger.info(
@@ -141,8 +145,15 @@ class SessionManager:
                 self._tmux.send_keys,
                 session_id,
                 text,
-                enter=True,
+                enter=False,
                 literal=True,
+            )
+            await asyncio.sleep(0.15)
+            await asyncio.to_thread(
+                self._tmux.send_keys,
+                session_id,
+                "Enter",
+                enter=False,
             )
 
     async def capture_output(self, session_id: str) -> SessionOutput:
@@ -242,6 +253,7 @@ class SessionManager:
         self._last_tail.pop(session_id, None)
         self._last_history_size.pop(session_id, None)
         self._last_output.pop(session_id, None)
+        self._agents.pop(session_id, None)
 
     def _find_overlap(
         self,
@@ -290,11 +302,10 @@ class SessionManager:
         item_number: int,
         freeform_text: str | None = None,
     ) -> None:
-        """Select an option in a Claude Code numbered prompt.
+        """Select an option in a numbered prompt.
 
-        Re-captures the pane to find the current › position,
-        then sends arrow keys to navigate to the target item
-        and Enter to confirm.
+        Arrow-navigable lists (›/❯ marker): send Up/Down + Enter.
+        Non-navigable lists (no marker): type the number + Enter.
 
         Args:
             session_id: Target session.
@@ -317,25 +328,41 @@ class SessionManager:
             msg = f"Item {item_number} not found in selection"
             raise ValueError(msg)
 
-        delta = target_index - parsed.selected_index
-        key = "Down" if delta > 0 else "Up"
-
-        for _ in range(abs(delta)):
+        if parsed.arrow_navigable:
+            # Arrow-driven: move cursor then press Enter
+            delta = target_index - parsed.selected_index
+            key = "Down" if delta > 0 else "Up"
+            for _ in range(abs(delta)):
+                await asyncio.to_thread(
+                    self._tmux.send_keys,
+                    session_id,
+                    key,
+                    enter=False,
+                )
+                await asyncio.sleep(0.05)
+            await asyncio.sleep(0.15)
             await asyncio.to_thread(
                 self._tmux.send_keys,
                 session_id,
-                key,
+                "Enter",
                 enter=False,
             )
-            await asyncio.sleep(0.05)
-
-        # Press Enter to confirm
-        await asyncio.to_thread(
-            self._tmux.send_keys,
-            session_id,
-            "Enter",
-            enter=False,
-        )
+        else:
+            # Number-input: type the digit then Enter
+            await asyncio.to_thread(
+                self._tmux.send_keys,
+                session_id,
+                str(item_number),
+                enter=False,
+                literal=True,
+            )
+            await asyncio.sleep(0.15)
+            await asyncio.to_thread(
+                self._tmux.send_keys,
+                session_id,
+                "Enter",
+                enter=False,
+            )
 
         # For freeform: wait then type the text
         if freeform_text:
@@ -360,6 +387,7 @@ class SessionManager:
         self._last_output.pop(session_id, None)
         self._last_history_size.pop(session_id, None)
         self._last_tail.pop(session_id, None)
+        self._agents.pop(session_id, None)
 
     async def list_sessions(self) -> list[SessionInfo]:
         """List all tracked sessions.
@@ -385,6 +413,18 @@ class SessionManager:
                 self._mark_dead(session_id)
         return info
 
+    def _get_agent(self, session_id: str) -> BaseAgent:
+        """Get the agent for a session, falling back to Claude."""
+        agent = self._agents.get(session_id)
+        if agent is not None:
+            return agent
+        info = self._sessions.get(session_id)
+        agent_type = info.agent_type if info else AgentType.CLAUDE
+        cls = AGENT_REGISTRY.get(agent_type, ClaudeCodeAgent)
+        agent = cls()
+        self._agents[session_id] = agent
+        return agent
+
     def _require_session(self, session_id: str) -> None:
         """Raise if session_id is not tracked."""
         if session_id not in self._sessions:
@@ -405,16 +445,22 @@ class SessionManager:
             info.is_alive = False
             info.ended_at = time.time()
 
-    def _build_session_id(self, path: Path, title: str | None) -> str:
+    def _build_session_id(
+        self,
+        path: Path,
+        title: str | None,
+        agent_type: AgentType = AgentType.CLAUDE,
+    ) -> str:
         """Generate a session id from the directory name.
 
         Uses the first 20 chars of the directory name. If a session
         for the same directory already exists or the id collides,
-        adds a numeric suffix.
+        adds a numeric suffix. Non-claude agents get a prefix,
+        e.g. "agent-codex-myproject".
         """
         name_source = title.strip() if title else path.name
         base_name = self._slug_dir_name(name_source)[:20] or "session"
-        base = f"agent-{base_name}"
+        base = f"agent-{agent_type.value}-{base_name}"
         working_dir = str(path)
         has_same_dir = any(
             info.working_dir == working_dir for info in self._sessions.values()
@@ -453,6 +499,7 @@ class SessionManager:
             self._output_log.soft_delete(session_id)
         self._sessions.pop(session_id, None)
         self._last_output.pop(session_id, None)
+        self._agents.pop(session_id, None)
 
     def register_dead_session(
         self,
@@ -519,6 +566,7 @@ class SessionManager:
         session_id: str,
         description: str,
         tmux_capture: str,
+        agent_to_debug: AgentType,
     ) -> None:
         """Wait for Claude to be ready, then send debug prompt.
 
@@ -544,7 +592,8 @@ class SessionManager:
         message = (
             "first read docs/architecture.md to understand "
             "the application architecture.\n\n"
-            f"User reported an issue:\n{description}\n\n"
+            f"User using {agent_to_debug.value} "
+            f"reported this issue:\n{description}\n\n"
             "just analyze the root cause and do not "
             "change the code just yet. "
             "below is the tmux capture :\n\n"

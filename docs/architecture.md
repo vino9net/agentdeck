@@ -2,71 +2,35 @@
 
 Remote browser access to coding agents running on a local machine.
 FastAPI backend manages tmux sessions, serves output via HTMX polling,
-and detects Claude Code UI states (spinners, selection menus, prompts)
+and detects agent UI states (spinners, selection menus, prompts)
 so the browser can render appropriate controls.
 
 ## Components
 
-```
-┌──────────────────────────────────────────────────────────┐
-│  Browser                                                 │
-│  ┌───────────┐  ┌──────────┐  ┌────────────────────────┐ │
-│  │ Alpine.js │  │  HTMX    │  │ Service Worker (cache) │ │
-│  │ app state │◄─┤ polling  │  └────────────────────────┘ │
-│  └────┬──────┘  └────┬─────┘                             │
-│       │  UI events   │  HTML + OOB state                 │
-└───────┼──────────────┼───────────────────────────────────┘
-        │              │
-────────┼──────────────┼──── HTTP ──────────────────────────
-        │              │
-┌───────┼──────────────┼───────────────────────────────────┐
-│  FastAPI (main.py)   │                                   │
-│       │              │                                   │
-│  ┌────▼──────────────▼────┐    ┌───────────────────────┐ │
-│  │  API Layer             │    │  Config (settings)    │ │
-│  │  ┌──────────────────┐  │    │  Pydantic BaseSettings│ │
-│  │  │ sessions.py      │  │    │  env / .env           │ │
-│  │  │ REST CRUD +      │  │    └───────────────────────┘ │
-│  │  │ output polling   │  │                              │
-│  │  └────────┬─────────┘  │                              │
-│  └───────────┼────────────┘                              │
-│              │                                           │
-│  ┌───────────▼────────────┐                              │
-│  │  SessionManager        │   ┌────────────────────────┐ │
-│  │  (async orchestrator)  │──►│  UIStateDetector       │ │
-│  │                        │   │  regex state detection │ │
-│  │  • lifecycle mgmt      │   │  WORKING / SELECTION / │ │
-│  │  • input routing       │   │  PROMPT                │ │
-│  │  • output diffing      │   └────────────────────────┘ │
-│  │  • background capture  │   ┌────────────────────────┐ │
-│  │  • recent dirs         │──►│  AgentOutputLog(SQLite)│ │
-│  └──────┬────────┬────────┘   │  FTS5 search, history  │ │
-│         │        │            │  state/output.db       │ │
-│         │        │            └────────────────────────┘ │
-│         │        │                                       │
-│  ┌──────▼──┐  ┌──▼──────────────┐                        │
-│  │  Agent  │  │  TmuxBackend    │                        │
-│  │ Adapter │  │  (sync)         │                        │
-│  │         │  │                 │                        │
-│  │ BaseAgent  │  libtmux.Server │                        │
-│  │  ABC    │  │  create/send/   │                        │
-│  │         │  │  capture/kill   │                        │
-│  │ Claude  │  └────────┬────────┘                        │
-│  │ Code    │           │                                 │
-│  └─────────┘           │ asyncio.to_thread()             │
-│                        │                                 │
-└────────────────────────┼─────────────────────────────────┘
-                         │
-               ┌─────────▼────────-─┐
-               │  tmux server       │
-               │  ┌───────────────┐ │
-               │  │ agent-foo     │ │  ← each session is a
-               │  │ (claude)      │ │    tmux window running
-               │  ├───────────────┤ │    a coding agent
-               │  │ agent-bar     │ │
-               │  │ (claude)      │ │
-               │  └───────────────┘ │
-               └───────────────────-┘
+```mermaid
+graph TD
+    subgraph Browser
+        HTMX["HTMX + Alpine.js"]
+    end
+
+    subgraph Server ["FastAPI"]
+        API["API Layer"]
+        subgraph SM ["SessionManager"]
+            Detector["UIStateDetector"]
+            Log["AgentOutputLog"]
+        end
+        TB["TmuxBackend"]
+    end
+
+    subgraph tmux ["tmux server"]
+        S1["agent-claude"]
+        S2["agent-codex"]
+    end
+
+    HTMX -- "HTTP" --> API
+    API --> SM
+    SM --> TB
+    TB --> tmux
 ```
 
 ### How components connect
@@ -190,11 +154,12 @@ Database file: `state/output.db`.
 
 `ClaudeCodeAgent` implements it for `claude`:
 
-- Launch: `cd {dir} && claude`
+- Launch: `scripts/start_agent.sh {dir} claude` (activates `.venv`
+  if present, then execs the agent)
 - Shortcuts: stop → Escape, yes → y, no → n, cancel → C-c,
   up/down/enter → arrow keys
 
-The ABC exists so other agent types can be plugged in later.
+The ABC exists so other agent types (e.g. Codex) can be plugged in.
 
 ### 7. REST API — `api/sessions.py`
 
@@ -244,25 +209,27 @@ The Alpine component (`codeServer()` in `app.js`) manages:
 - Recent-directory autocomplete on session creation.
 - Voice input via Web Speech API (long-press on send button).
 
-A service worker uses network-first for HTML and stale-while-revalidate
-for static assets. API requests bypass the cache entirely.
-
 ## Data flow
 
 ### 1. Creating a session
 
-```
-Browser
-  │  POST /api/v1/sessions {working_dir, title}
-  ▼
-sessions.py  ──►  SessionManager.create_session()
-                      │
-                      ├─ validate working_dir
-                      ├─ generate session_id (agent-xxx)
-                      ├─ ClaudeCodeAgent.launch_command()
-                      └─ to_thread ──► TmuxBackend.create_session()
-                                            │
-                                            └─ libtmux new_session()
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant API as sessions.py
+    participant SM as SessionManager
+    participant TB as TmuxBackend
+
+    B->>API: POST /api/v1/sessions {working_dir, title}
+    API->>SM: create_session()
+    SM->>SM: validate working_dir
+    SM->>SM: generate session_id (agent-xxx)
+    SM->>SM: ClaudeCodeAgent.launch_command()
+    SM->>TB: asyncio.to_thread() → create_session()
+    TB->>TB: libtmux new_session()
+    TB-->>SM: session name
+    SM-->>API: SessionInfo
+    API-->>B: 201 Created
 ```
 
 ### 2. Live output (how the UI stays up to date)
@@ -271,37 +238,25 @@ HTMX polls `GET /output` every 800ms. The server captures the
 visible tmux pane, diffs against the last capture, and returns
 HTML only when content has changed.
 
-```
-Browser (HTMX polling loop, every 800ms)
-  │
-  │  GET /api/v1/sessions/{id}/output?force=true|false
-  ▼
-sessions.py
-  │  SessionManager.capture_output(id)
-  │    └─ to_thread ──► TmuxBackend.capture_pane()
-  │                          └─ visible pane only (~35 lines)
-  │
-  ├─ diff against _last_output[id]
-  │    ├─ unchanged → 204 No Content (HTMX skips swap)
-  │    └─ changed   → 200 OK
-  │
-  ├─ UIStateDetector.parse(raw)
-  │    └─ detect WORKING / SELECTION / PROMPT
-  │
-  └─ response:
-       ├─ terminal.html partial (rendered pane content)
-       └─ OOB div #ui-state-data (ParsedOutput JSON)
-            └─ Alpine.js picks up state via MutationObserver
-               └─ shows/hides selection overlay, buttons, etc.
+```mermaid
+flowchart TD
+    B["Browser<br/>HTMX polling every 800ms"]
+    B -- "GET /output" --> API["sessions.py"]
+    API -- "asyncio.to_thread()" --> Cap["capture_pane() → ~35 lines"]
+    Cap --> Diff{"diff vs last output"}
+    Diff -- "unchanged" --> N204["204 No Content"]
+    Diff -- "changed" --> Parse["UIStateDetector.parse()<br/>→ WORKING / SELECTION / PROMPT"]
+    Parse --> Resp["200 OK<br/>terminal.html + OOB state JSON"]
 ```
 
 User input flows the other direction:
 
-```
-Browser  ──POST─►  /api/v1/sessions/{id}/input
-                     └─ SessionManager.send_input()
-                          ├─ expand shortcut (stop → Escape, etc.)
-                          └─ to_thread ──► TmuxBackend.send_keys()
+```mermaid
+flowchart LR
+    B["Browser"] -- "POST /sessions/{id}/input" --> API["sessions.py"]
+    API --> SM["SessionManager.send_input()"]
+    SM --> Exp["expand shortcut<br/>(stop → Escape, etc.)"]
+    SM -- "asyncio.to_thread()" --> TK["TmuxBackend.send_keys()"]
 ```
 
 ### 3. Background output capture (persistent history)
@@ -316,42 +271,24 @@ scrolled above the visible pane. The visible pane (spinners,
 progress bars, in-place updates) is excluded from history. This
 cleanly separates stable history from volatile live content.
 
-```
-_capture_loop (asyncio task, runs continuously)
-  │
-  │  sleep(capture_interval_s)           ← default 2s
-  │
-  └─ for each active session:
-       SessionManager.capture_to_log()
-         │
-         ├─ to_thread ──► is_process_dead(session_id)
-         │
-         ├─ if dead:
-         │    └─ _capture_final()
-         │         ├─ capture full buffer (scrollback + visible)
-         │         ├─ fingerprint overlap → append new lines
-         │         ├─ kill tmux session + mark dead
-         │         └─ clean up tracking state
-         │
-         ├─ to_thread ──► get_history_size(session_id)
-         │                     └─ lines above visible pane
-         │
-         ├─ if history_size == last_history_size:
-         │    └─ return (nothing scrolled, skip capture)
-         │
-         ├─ to_thread ──► capture_scrollback(session_id)
-         │                     └─ full buffer
-         │
-         ├─ slice to scrollback: lines[:history_size]
-         │
-         ├─ fingerprint overlap detection:
-         │    take last 5 lines of previous capture
-         │    find them in current scrollback
-         │    everything after = new lines
-         │
-         └─ if new lines found:
-              └─ AgentOutputLog.append(session_id, delta)
-                   └─ SQLite INSERT + FTS5 trigger
+```mermaid
+flowchart TD
+    Loop["_capture_loop<br/>asyncio task, sleep 2s"]
+    Loop --> Each["for each active session"]
+    Each --> CTL["SessionManager.capture_to_log()"]
+    CTL --> Dead{"is_process_dead?"}
+    Dead -- "yes" --> Final["_capture_final()"]
+    Final --> F1["capture full buffer<br/>(scrollback + visible)"]
+    Final --> F2["fingerprint overlap → append new lines"]
+    Final --> F3["kill tmux session + mark dead"]
+    Dead -- "no" --> HS{"get_history_size()<br/>changed?"}
+    HS -- "unchanged" --> Skip["skip capture<br/>(nothing scrolled)"]
+    HS -- "changed" --> CS["capture_scrollback()"]
+    CS --> Slice["slice to scrollback lines"]
+    Slice --> FP["fingerprint overlap detection<br/>last 5 lines of prev capture"]
+    FP --> New{"new lines?"}
+    New -- "yes" --> Append["AgentOutputLog.append()<br/>SQLite INSERT + FTS5 trigger"]
+    New -- "no" --> Skip
 ```
 
 **Fast path** (common case — spinners/tool panels updating
@@ -371,15 +308,10 @@ visible pane), then kills the tmux session and marks it dead.
 
 The terminal view has two zones:
 
-```
-┌─────────────────────────┐
-│  ↑ history zone         │  ← scrollback from SQLite, loaded on scroll-up
-│  (stable, frozen output)│
-├─────────────────────────┤
-│  live zone              │  ← visible pane via HTMX polling
-│  ⠋ Working on task...   │     (volatile, real-time)
-└─────────────────────────┘
-```
+| Browser Window |  |
+|---|---|
+| **↑ history zone** <br/> stable, frozen output <br/> scrollback from SQLite, loaded on scroll-up | top |
+| **live zone** <br/> visible pane via HTMX polling <br/> volatile, real-time | bottom |
 
 These two zones correspond to different data sources:
 
@@ -393,32 +325,29 @@ When the user scrolls up past the live pane, the browser fetches
 older output from the SQLite database via timestamp-based
 pagination.
 
-```
-Browser (user scrolls up)
-  │
-  │  IntersectionObserver fires on sentinel at top of history zone
-  │
-  │  GET /api/v1/sessions/{id}/output?mode=history&before={ts}&limit=50
-  ▼
-sessions.py
-  │  AgentOutputLog.read(session_id, before=ts, limit=50)
-  │    └─ SELECT ... WHERE ts < ? ORDER BY ts DESC LIMIT 50
-  │
-  └─ response JSON:
-       { chunks: [...], earliest_ts: 1738800000.0 }
-         │
-         └─ browser prepends to history zone above live pane
-            └─ passes earliest_ts as 'before' for next page
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant API as sessions.py
+    participant Log as AgentOutputLog
+
+    B->>B: user scrolls up, IntersectionObserver fires
+    B->>API: GET /output?mode=history&before={ts}&limit=50
+    API->>Log: read(session_id, before=ts, limit=50)
+    Log-->>API: chunks + earliest_ts
+    API-->>B: JSON {chunks, earliest_ts}
+    B->>B: prepend to history zone, use earliest_ts for next page
 ```
 
-### Output parsing
+### 5. UI state detection
 
-```
-raw pane text
-  │
-  ├─ _try_working()   → spinner / perf-eval? → WORKING
-  ├─ _try_selection()  → numbered items + footer? → SELECTION
-  └─ fallback          → PROMPT
+```mermaid
+flowchart TD
+    Raw["raw pane text"] --> W{"_try_working()<br/>spinner / perf-eval?"}
+    W -- "yes" --> WORKING
+    W -- "no" --> S{"_try_selection()<br/>numbered items + footer?"}
+    S -- "yes" --> SELECTION
+    S -- "no" --> PROMPT
 ```
 
 ## Session lifecycle

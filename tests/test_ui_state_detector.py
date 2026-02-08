@@ -104,6 +104,21 @@ SELECTION_PERMISSION_PADDED = (
     " Esc to cancel · Tab to amend · ctrl+e to explain\n" + "\n" * 16  # tmux pane padding
 )
 
+# Codex number-input selection (no marker, question ends with :)
+SELECTION_CODEX_NUMBER_INPUT = """\
+• Pick one option:
+
+  1. Build a quick feature in this repo
+  2. Debug a specific bug
+  3. Review architecture and suggest improvements
+  4. Add/expand tests
+  5. Explain one module in depth
+
+› Explain this codebase
+
+  ? for shortcuts                                         82% context left
+"""
+
 # Numbered list with neither question header nor footer
 NUMBERED_LIST_NO_SIGNAL = """\
   Here are the results
@@ -118,13 +133,25 @@ WORKING_SPINNER = """\
 ✳ Moonwalking… (thought for 3s)
 """
 
+WORKING_SPINNER_COLLOQUIAL = """\
+✳ Hustlin'… (thought for 2s)
+"""
+
+WORKING_SPINNER_LONG_TEXT = """\
+· Renaming OutputLog to AgentOutputLog across codebase… (1m 50s)
+"""
+
+WORKING_SPINNER_TOOL_USE = """\
+⏺ Reading 1 file… (ctrl+o to expand)
+"""
+
 WORKING_SPINNER_COMPACT = """\
 ✻ compacting conversation…
 """
 
-WORKING_PERF_EVAL = """\
+WORKING_SURVEY = """\
   Some output above
-  0:bad 1:fair 2:good 3:excellent
+  1: Bad    2: Fine    3: Good    0: Dismiss
 """
 
 # ── Prompt state fixtures ───────────────────────────────
@@ -202,6 +229,27 @@ class TestSelectionState:
         assert result.items[2].label == "No"
         assert result.selected_index == 0
 
+    def test_arrow_navigable_with_marker(self, parser):
+        """Selection with ❯ marker → arrow_navigable=True."""
+        result = parser.parse(SELECTION_BASIC)
+        assert result.state == UIState.SELECTION
+        assert result.arrow_navigable is True
+
+    def test_arrow_navigable_no_marker_with_footer(self, parser):
+        """Selection without marker but with footer → not navigable."""
+        result = parser.parse(SELECTION_REAL_CAPTURE)
+        assert result.state == UIState.SELECTION
+        assert result.arrow_navigable is False
+
+    def test_codex_number_input_selection(self, parser):
+        """Codex number-input selection (no marker, colon question)."""
+        result = parser.parse(SELECTION_CODEX_NUMBER_INPUT)
+        assert result.state == UIState.SELECTION
+        assert result.arrow_navigable is False
+        assert len(result.items) == 5
+        assert result.items[0].label == "Build a quick feature in this repo"
+        assert result.items[4].label == "Explain one module in depth"
+
     def test_scrolled_away_not_selection(self, parser):
         """Old selection scrolled above bottom 5 → PROMPT."""
         result = parser.parse(SELECTION_SCROLLED_AWAY)
@@ -218,14 +266,26 @@ class TestWorkingState:
         result = parser.parse(WORKING_SPINNER)
         assert result.state == UIState.WORKING
 
+    def test_spinner_colloquial_apostrophe(self, parser):
+        result = parser.parse(WORKING_SPINNER_COLLOQUIAL)
+        assert result.state == UIState.WORKING
+
+    def test_spinner_long_text(self, parser):
+        result = parser.parse(WORKING_SPINNER_LONG_TEXT)
+        assert result.state == UIState.WORKING
+
+    def test_spinner_tool_use(self, parser):
+        result = parser.parse(WORKING_SPINNER_TOOL_USE)
+        assert result.state == UIState.WORKING
+
     def test_spinner_compact(self, parser):
         result = parser.parse(WORKING_SPINNER_COMPACT)
         assert result.state == UIState.WORKING
 
-    def test_perf_eval_detected(self, parser):
-        result = parser.parse(WORKING_PERF_EVAL)
+    def test_survey_auto_dismiss(self, parser):
+        result = parser.parse(WORKING_SURVEY)
         assert result.state == UIState.WORKING
-        assert result.auto_response == "2"
+        assert result.auto_response == "0"
 
 
 class TestPromptState:
