@@ -2,8 +2,8 @@
 
 from abc import ABC, abstractmethod
 
-# (text_to_send, send_enter, need_confirmation)
-SlashCommand = tuple[str, bool, bool]
+# (text_to_send, send_enter, need_confirmation, show_nav)
+SlashCommand = tuple[str, bool, bool, bool]
 
 
 class BaseAgent(ABC):

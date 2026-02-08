@@ -1,5 +1,6 @@
 """Tests for the sessions REST API."""
 
+import io
 import time
 from unittest.mock import AsyncMock, MagicMock
 
@@ -26,6 +27,7 @@ def _make_mock_manager():
     mgr.get_session = AsyncMock(return_value=info)
     mgr.send_input = AsyncMock()
     mgr.send_selection = AsyncMock()
+    mgr.paste_image = AsyncMock()
     mgr.kill_session = AsyncMock()
     mgr.list_recent_dirs = MagicMock(return_value=["/tmp"])
     return mgr
@@ -183,5 +185,61 @@ async def test_send_input_dead_returns_409(client):
     resp = await client.post(
         "/api/v1/sessions/agent-dead/input",
         json={"text": "hello"},
+    )
+    assert resp.status_code == 409
+
+
+# --- Image paste tests ---
+
+_PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+
+
+@pytest.mark.asyncio
+async def test_paste_image_png(client):
+    """Upload a PNG image and paste it into the session."""
+    resp = await client.post(
+        "/api/v1/sessions/agent-test123/image",
+        files={"file": ("shot.png", io.BytesIO(_PNG_BYTES), "image/png")},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "pasted"
+    mgr = app.state.session_manager
+    mgr.paste_image.assert_awaited_once()
+    call_args = mgr.paste_image.call_args
+    assert call_args[0][0] == "agent-test123"
+    assert call_args[0][2] == "png"
+
+
+@pytest.mark.asyncio
+async def test_paste_image_jpeg(client):
+    """Upload a JPEG image."""
+    resp = await client.post(
+        "/api/v1/sessions/agent-test123/image",
+        files={"file": ("photo.jpg", io.BytesIO(b"\xff\xd8"), "image/jpeg")},
+    )
+    assert resp.status_code == 200
+    call_args = app.state.session_manager.paste_image.call_args
+    assert call_args[0][2] == "jpeg"
+
+
+@pytest.mark.asyncio
+async def test_paste_image_bad_type(client):
+    """Non-image content type is rejected."""
+    resp = await client.post(
+        "/api/v1/sessions/agent-test123/image",
+        files={"file": ("file.txt", io.BytesIO(b"hello"), "text/plain")},
+    )
+    assert resp.status_code == 400
+    assert "Unsupported" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_paste_image_dead_session(client):
+    """Pasting to a dead session returns 409."""
+    mgr = app.state.session_manager
+    mgr.paste_image = AsyncMock(side_effect=ValueError("Session ended"))
+    resp = await client.post(
+        "/api/v1/sessions/agent-test123/image",
+        files={"file": ("img.png", io.BytesIO(_PNG_BYTES), "image/png")},
     )
     assert resp.status_code == 409

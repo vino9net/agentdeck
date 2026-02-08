@@ -12,16 +12,19 @@ SHORTCUTS: dict[str, tuple[str, bool]] = {
     "cancel": ("C-c", False),
     "up": ("Up", False),
     "down": ("Down", False),
+    "left": ("Left", False),
+    "right": ("Right", False),
     "enter": ("Enter", False),
     "tab": ("BTab", False),
 }
 
-# (text, send_enter, need_confirmation)
+# (text, send_enter, need_confirmation, show_nav)
 SLASH_COMMANDS: list[SlashCommand] = [
-    ("/context", True, False),
-    ("/clear", True, True),
-    ("/compact", True, True),
-    ("/pytest", True, False),
+    ("/clear", True, True, False),
+    ("/config", True, False, True),
+    ("/context", True, False, False),
+    ("/compact", True, True, False),
+    ("/model", True, False, True),
 ]
 
 

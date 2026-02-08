@@ -35,6 +35,14 @@ You do not need to manually format files during development.
 - See **Primary Use Case** above — mobile-first is the top priority
 - Readable text sizes, high-contrast controls, and layouts that reflow cleanly on small screens
 
+## Playwright (browser testing)
+
+- Primary test device: **Pixel 9** — viewport **443×908** CSS pixels
+- Always resize to mobile viewport before testing UI:
+  `browser_resize(width=443, height=908)`
+- The viewport size is also shown in the Sessions dropdown (bottom-right)
+- use temporary directory for screenshots, e.g. ./tmp, not in project root
+
 ## Testing
 
 - Write tests that verify **behavior**, not implementation details

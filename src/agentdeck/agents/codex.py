@@ -16,7 +16,8 @@ SHORTCUTS: dict[str, tuple[str, bool]] = {
 }
 
 SLASH_COMMANDS: list[SlashCommand] = [
-    ("/model", True, False),
+    ("/model", True, False, True),
+    ("/review", True, False, True),
 ]
 
 

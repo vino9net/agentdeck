@@ -37,10 +37,10 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# uv
-uv.lock
-
 # proj local files
 tmp/
 state/
 s
+
+# internal scripts
+scripts/capture*.py

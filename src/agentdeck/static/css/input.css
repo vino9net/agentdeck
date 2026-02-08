@@ -1,0 +1,7 @@
+@import "tailwindcss";
+@plugin "daisyui";
+
+/* Match DaisyUI v4 dark theme text color (softer than v5 default) */
+[data-theme="dark"] {
+    --color-base-content: oklch(74.61% 0.0137 254.1);
+}

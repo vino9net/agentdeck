@@ -200,14 +200,20 @@ The Alpine component (`codeServer()` in `app.js`) manages:
 - UI state sync — a `MutationObserver` on `#ui-state-data` parses the
   JSON attribute and updates Alpine state for selection overlays.
 - Auto-scroll — a `MutationObserver` on `#terminal-output`.
-- Sticky scroll timestamp — a floating badge at the top of the scroll
-  area shows the timestamp of the topmost visible history chunk while
-  scrolling. Auto-hides after 1.5s. Format: `h:mm:ss AM/PM` (<12h)
-  or `Mon D h:mm AM/PM` (older).
-- Shortcut buttons: ESC (yellow, text label), arrow keys, Enter,
-  Tab, and Ctrl-C (red stop icon, right-aligned for safety).
+- Sticky scroll timestamp — a non-interactive badge at the top of
+  the scroll area shows the timestamp of the topmost visible history
+  chunk while scrolling. Auto-hides after 1.5s. Format:
+  `h:mm:ss AM/PM` (<12h) or `Mon D h:mm AM/PM` (older).
+- Button layout system — a `buttonLayout` computed getter drives
+  which shortcut buttons appear in the bottom bar. Three layouts:
+  - **normal** — ESC, ↑, ↓, Enter, Tab, Ctrl-C (agent interaction)
+  - **scroll** — ESC, ↑, ↓, ←Prev, →Next, ↓Bottom (prompt
+    navigation). Activates after scrolling ~2 viewports up.
+  - **selection** — replaces the entire input bar with numbered
+    option buttons when the agent presents a selection menu.
+  Priority: scroll > selection > normal. Shared buttons (ESC, ↑, ↓,
+  /, Debug, Image) are always visible across layouts.
 - Recent-directory autocomplete on session creation.
-- Voice input via Web Speech API (long-press on send button).
 
 ## Data flow
 

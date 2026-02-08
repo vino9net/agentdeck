@@ -89,6 +89,26 @@ uv run ruff check . --fix  # lint
 uv run ty check            # type check
 ```
 
+### CSS build
+
+The frontend uses Tailwind CSS + DaisyUI. Styles are compiled with
+[`tailwindcss-extra`](https://github.com/nickolaj-jepsen/tailwindcss-extra),
+a drop-in `tailwindcss` CLI that bundles first-party plugins like
+DaisyUI.
+
+See [GitHub](https://github.com/nickolaj-jepsen/tailwindcss-extra) for how to install
+
+```bash
+# for macOS
+brew install nickolaj-jepsen/tap/tailwindcss-extra
+
+# rebuild CSS whenever you change templates or input.css
+scripts/build-css.sh
+```
+
+You do **not** need to run this for backend-only changes — the
+compiled `tailwind.css` is checked into the repo.
+
 ## Contributing
 
 Contributions are welcome! 

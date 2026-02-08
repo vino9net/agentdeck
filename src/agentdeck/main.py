@@ -189,6 +189,8 @@ app = create_app()
 @app.get("/")
 async def index(request: Request):  # type: ignore[no-untyped-def]
     """Serve the main PWA page."""
+    session = request.query_params.get("session")
+    logger.debug("page_load", session=session)
     settings = get_settings()
     sessions = await request.app.state.session_manager.list_sessions()
     return templates.TemplateResponse(

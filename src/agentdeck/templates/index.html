@@ -1,18 +1,30 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div x-data="codeServer()" class="flex flex-col h-screen" data-sessions='{{ sessions | tojson }}' data-session-refresh-ms="{{ session_refresh_ms }}">
+<div x-data="codeServer()" class="flex flex-col fixed inset-0" data-sessions='{{ sessions | tojson }}' data-session-refresh-ms="{{ session_refresh_ms }}">
     <!-- Top navbar -->
     <div class="navbar bg-base-100 shadow-lg px-4">
-        <div class="flex-1">
-            <span class="text-lg font-bold"
+        <div class="flex-1 flex items-center gap-1">
+            <button class="btn btn-ghost btn-sm btn-square"
+                    @click="location.reload()"
+                    title="Refresh page">
+                <svg class="w-4 h-4" fill="none"
+                     stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2.5"
+                          d="M4 4v5h5M20 20v-5h-5"/>
+                    <path stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2.5"
+                          d="M20.49 9A9 9 0 005.64 5.64L4 9m16 6l-1.64 3.36A9 9 0 014.51 15"/>
+                </svg>
+            </button>
+            <span class="text-sm font-bold truncate"
                   x-text="activeSession
-                    ? (isActiveSessionAlive
-                      ? 'Remote agent session: ' + activeSession
-                      : 'Conversation history with ' + activeSession
-                        + (activeSessionInfo?.ended_at
-                          ? ' (' + formatEndedAt(activeSessionInfo.ended_at) + ')'
-                          : ''))
+                    ? 'Session: ' + (activeSession.length > 30
+                      ? activeSession.slice(0, 30) + '…'
+                      : activeSession)
                     : 'Remote Agent'"></span>
         </div>
         <div class="flex-none gap-2">
@@ -69,14 +81,14 @@
                     </div>
                     <div class="divider my-1"></div>
                     <form @submit.prevent="createSession(); document.activeElement.blur()">
-                        <div class="form-control">
+                        <fieldset>
                             <label class="label">
                                 <span class="label-text">Work directory</span>
                             </label>
                             <input type="text"
                                    x-model="newWorkingDir"
                                    list="recent-dirs"
-                                   class="input input-sm input-bordered w-full mb-2">
+                                   class="input input-sm w-full mb-2">
                             <datalist id="recent-dirs">
                                 <template x-for="dir in recentDirs" :key="dir">
                                     <option :value="dir"></option>
@@ -85,7 +97,7 @@
                             <div class="flex items-center gap-2 mb-2">
                                 <span class="label-text flex-shrink-0">Agent</span>
                                 <select x-model="newAgentType"
-                                        class="select select-sm select-bordered flex-1">
+                                        class="select select-sm flex-1">
                                     <option value="claude">Claude</option>
                                     <option value="codex">Codex</option>
                                 </select>
@@ -95,37 +107,43 @@
                                 <span class="text-xs text-base-content/70">agent-</span>
                                 <input type="text"
                                        x-model="newTitle"
-                                       class="input input-sm input-bordered flex-1">
+                                       class="input input-sm flex-1">
                             </div>
                             <button type="submit" class="btn btn-sm btn-primary w-full">
                                 New Session
                             </button>
-                        </div>
+                        </fieldset>
                     </form>
+                    <div class="text-[0.6rem] text-base-content/30 text-right mt-1"
+                         x-text="window.innerWidth + '×' + window.innerHeight"></div>
                 </div>
             </div>
         </div>
     </div>
 
     <!-- Main content area -->
-    <div class="flex-1 overflow-hidden mx-4 mt-2">
+    <div class="flex-1 overflow-hidden mx-4 mt-2 relative">
         <!-- Terminal view -->
         <div class="h-full overflow-auto relative"
+             style="overscroll-behavior-y: contain"
              x-ref="terminalScroll">
-            <!-- Sticky timestamp badge -->
+            <!-- Sticky scroll timestamp badge -->
             <div x-show="scrollTimestamp"
-                 x-text="scrollTimestamp"
                  x-transition:enter="transition ease-out duration-200"
                  x-transition:enter-start="opacity-0 -translate-y-1"
                  x-transition:enter-end="opacity-100 translate-y-0"
                  x-transition:leave="transition ease-in duration-150"
                  x-transition:leave-start="opacity-100"
                  x-transition:leave-end="opacity-0"
-                 class="sticky top-0 z-10 mx-auto w-fit px-3 py-0.5 rounded-b-lg bg-base-300/80 backdrop-blur text-base-content/50 text-[0.65rem] font-mono select-none pointer-events-none"></div>
+                 class="sticky top-0 z-10 mx-auto w-fit px-3 py-0.5
+                        rounded-b-lg bg-base-300/80 backdrop-blur
+                        text-base-content/50 text-[0.65rem] font-mono
+                        select-none pointer-events-none"
+                 x-text="scrollTimestamp"></div>
+            <!-- Sentinel outside x-if so it always exists for IntersectionObserver -->
+            <div id="history-sentinel" class="history-sentinel"></div>
             <template x-if="activeSession">
                 <div>
-                    <!-- History zone (scrollback from DB) -->
-                    <div id="history-sentinel" class="history-sentinel"></div>
                     <div x-show="historyLoading" class="text-center text-base-content/40 text-xs py-2">
                         Loading history...
                     </div>
@@ -147,11 +165,6 @@
                     </template>
                     <div id="ui-state-data" style="display:none"></div>
 
-                    <!-- Dead session banner -->
-                    <div x-show="!isActiveSessionAlive"
-                         class="text-center text-base-content/50 py-8 border-t border-base-content/10">
-                        Session ended
-                    </div>
                 </div>
             </template>
             <div x-show="!activeSession" class="flex items-center justify-center h-full">
@@ -161,11 +174,23 @@
                 </div>
             </div>
         </div>
+        <!-- Floating nav for dead sessions -->
+        <div x-show="activeSession && !isActiveSessionAlive"
+             class="absolute bottom-2 left-1/2 -translate-x-1/2 z-10
+                    flex gap-1 px-2 py-1 rounded-full
+                    bg-base-300/80 backdrop-blur shadow-lg">
+            <button class="btn btn-sm btn-square btn-ghost"
+                    @click="jumpToPrevPrompt()">&#x2191;</button>
+            <button class="btn btn-sm btn-square btn-ghost"
+                    @click="jumpToNextPrompt()">&#x2193;</button>
+            <button class="btn btn-sm btn-square btn-ghost"
+                    @click="_pinned=true; $refs.terminalScroll.scrollTop=$refs.terminalScroll.scrollHeight">&#x25BC;</button>
+        </div>
     </div>
 
     <!-- Selection overlay (only for alive sessions) -->
     <div class="p-2 bg-base-300 border-t border-base-content/10"
-         x-show="isActiveSessionAlive && uiState === 'selection'"
+         x-show="isActiveSessionAlive && buttonLayout === 'selection'"
          x-transition>
         <div class="flex gap-1 mb-1 overflow-x-auto">
             <template x-for="item in selectionItems.filter(i => !i.is_freeform)" :key="item.number">
@@ -186,7 +211,7 @@
                 <input type="text"
                        x-model="freeformText"
                        placeholder="Type something..."
-                       class="input input-sm input-bordered flex-1"
+                       class="input input-sm flex-1"
                        :disabled="!connected">
                 <button type="submit" class="btn btn-sm btn-primary"
                         :disabled="!connected || !freeformText.trim()">
@@ -197,32 +222,56 @@
     </div>
 
     <!-- Input bar (only for alive sessions) -->
-    <div class="p-4 bg-base-200"
-         x-show="isActiveSessionAlive && uiState !== 'selection'">
+    <div class="px-4 py-2 bg-base-200"
+         x-show="isActiveSessionAlive && buttonLayout !== 'selection'">
         <!-- Shortcut buttons -->
-        <div class="flex gap-1 mb-2">
+        <div class="flex gap-1 mb-1">
             <div class="flex gap-1 overflow-x-auto">
+                <!-- Shared: always visible -->
                 <button class="btn btn-sm btn-square btn-warning"
-                        @click="sendShortcut('stop')"
+                        @click="_slashNav = false; sendShortcut('stop')"
                         :disabled="!connected"
                         title="Escape">
                     <span class="text-[0.6rem] font-bold leading-none">ESC</span>
                 </button>
                 <button class="btn btn-sm btn-square btn-outline"
-                        @click="sendShortcut('up')"
+                        @click="buttonLayout === 'scroll' ? jumpToPrevPrompt() : sendShortcut('up')"
                         :disabled="!connected">&#x2191;</button>
                 <button class="btn btn-sm btn-square btn-outline"
-                        @click="sendShortcut('down')"
+                        @click="buttonLayout === 'scroll' ? jumpToNextPrompt() : sendShortcut('down')"
                         :disabled="!connected">&#x2193;</button>
-                <button class="btn btn-sm btn-square btn-primary"
+
+                <!-- Slash layout: arrow nav + enter -->
+                <button x-show="buttonLayout === 'slash'"
+                        class="btn btn-sm btn-square btn-outline"
+                        @click="sendShortcut('left')"
+                        :disabled="!connected">&#x2190;</button>
+                <button x-show="buttonLayout === 'slash'"
+                        class="btn btn-sm btn-square btn-outline"
+                        @click="sendShortcut('right')"
+                        :disabled="!connected">&#x2192;</button>
+                <button x-show="buttonLayout === 'slash'"
+                        class="btn btn-sm btn-square btn-outline"
                         @click="sendShortcut('enter')"
                         :disabled="!connected"
                         title="Enter">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                    <svg class="w-4 h-4 -translate-y-px" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M20 7v10H6"/><path d="M10 13l-5 4 5 4"/>
                     </svg>
                 </button>
-                <button class="btn btn-sm btn-square btn-secondary"
+
+                <!-- Normal layout -->
+                <button x-show="buttonLayout === 'normal'"
+                        class="btn btn-sm btn-square btn-outline"
+                        @click="sendShortcut('enter')"
+                        :disabled="!connected"
+                        title="Enter">
+                    <svg class="w-4 h-4 -translate-y-px" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M20 7v10H6"/><path d="M10 13l-5 4 5 4"/>
+                    </svg>
+                </button>
+                <button x-show="buttonLayout === 'normal'"
+                        class="btn btn-sm btn-square btn-outline"
                         @click="sendShortcut('tab')"
                         :disabled="!connected"
                         title="Shift-Tab">
@@ -230,7 +279,8 @@
                         <path d="M4 12h11"/><path d="M11 6l6 6-6 6"/><path d="M20 5v14"/>
                     </svg>
                 </button>
-                <button class="btn btn-sm btn-square btn-error ml-auto"
+                <button x-show="buttonLayout === 'normal'"
+                        class="btn btn-sm btn-square btn-error ml-auto"
                         @click="sendShortcut('cancel')"
                         :disabled="!connected"
                         title="Ctrl-C">
@@ -238,6 +288,20 @@
                         <rect x="4" y="4" width="16" height="16" rx="2"/>
                     </svg>
                 </button>
+
+                <!-- Scroll layout (left/right hidden, kept for future use) -->
+                <button x-show="false"
+                        @click="jumpToPrevPrompt()"
+                        class="btn btn-sm btn-square btn-outline"
+                        title="Previous prompt">&#x2190;</button>
+                <button x-show="false"
+                        @click="jumpToNextPrompt()"
+                        class="btn btn-sm btn-square btn-outline"
+                        title="Next prompt">&#x2192;</button>
+                <button x-show="buttonLayout === 'scroll'"
+                        @click="_pinned=true; $refs.terminalScroll.scrollTop=$refs.terminalScroll.scrollHeight"
+                        class="btn btn-sm btn-square btn-outline ml-auto"
+                        title="Jump to bottom">&#x25BC;</button>
             </div>
             <div class="dropdown dropdown-top">
                 <button tabindex="0"
@@ -270,39 +334,30 @@
                     <path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/>
                 </svg>
             </button>
+            <button class="btn btn-sm btn-square btn-ghost flex-shrink-0"
+                    :disabled="!connected"
+                    @click="$refs.imageInput.click()"
+                    title="Paste image">
+                <svg class="w-4 h-4" fill="none"
+                     stroke="currentColor" viewBox="0 0 24 24"
+                     stroke-linecap="round"
+                     stroke-linejoin="round"
+                     stroke-width="2.5">
+                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
+                </svg>
+            </button>
         </div>
+        <input type="file"
+               accept="image/png,image/jpeg"
+               style="display:none"
+               x-ref="imageInput"
+               @change="pasteImage($event)">
 
         <!-- Text input -->
         <div class="flex gap-2 items-end">
-            <button type="button"
-                    class="btn btn-sm btn-square"
-                    :class="listening ? 'btn-error' : 'btn-ghost'"
-                    :disabled="!connected"
-                    @click="toggleVoice()">
-                <svg x-show="!listening"
-                     class="w-4 h-4" fill="none"
-                     stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2.5"
-                          d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
-                    <path stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2.5"
-                          d="M19 10v2a7 7 0 01-14 0v-2"/>
-                    <line x1="12" y1="19" x2="12" y2="23"
-                          stroke-linecap="round"
-                          stroke-width="2.5"/>
-                </svg>
-                <svg x-show="listening"
-                     class="w-4 h-4" viewBox="0 0 24 24"
-                     fill="currentColor">
-                    <rect x="6" y="6" width="12" height="12" rx="2"/>
-                </svg>
-            </button>
             <textarea x-model="inputText"
                       placeholder="Type a message or command..."
-                      class="textarea textarea-bordered flex-1 resize-none leading-snug"
+                      class="textarea flex-1 resize-none leading-snug"
                       rows="1"
                       :disabled="!connected"
                       x-ref="messageInput"
@@ -311,7 +366,7 @@
                       @input="$el.style.height='auto';$el.style.height=$el.scrollHeight+'px'"></textarea>
             <button type="button"
                     class="btn btn-primary btn-sm btn-square"
-                    :disabled="!connected || !inputText.trim() || uiState === 'working'"
+                    :disabled="!connected || !inputText.trim()"
                     @click="sendMessage()">
                 <svg class="w-4 h-4" fill="none"
                      stroke="currentColor" viewBox="0 0 24 24">
@@ -332,7 +387,7 @@
             <h3 class="font-bold text-lg mb-2">Report an issue</h3>
             <textarea x-model="debugDescription"
                       x-ref="debugInput"
-                      class="textarea textarea-bordered w-full"
+                      class="textarea w-full"
                       rows="5"
                       placeholder="What went wrong?"></textarea>
             <div class="modal-action">

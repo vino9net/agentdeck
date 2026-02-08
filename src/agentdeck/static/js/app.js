@@ -4,13 +4,11 @@ document.addEventListener("alpine:init", () => {
     activeSession: null,
     inputText: "",
     connected: false,
-    listening: false,
     sessions: [],
     recentDirs: [],
     newTitle: "",
     newWorkingDir: "",
     newAgentType: "claude",
-    recognition: null,
     uiState: "working",
     selectionItems: [],
     selectedIndex: 0,
@@ -20,7 +18,12 @@ document.addEventListener("alpine:init", () => {
     showDebugModal: false,
     debugDescription: "",
 
+    // Slash-command nav mode
+    _slashNav: false,
+
     // History scrollback state
+    _nearTop: true,
+    _scrollFar: false,
     historyChunks: [],
     earliestTs: null,
     historyLoading: false,
@@ -51,6 +54,16 @@ document.addEventListener("alpine:init", () => {
       return this.sessions.find(
         (s) => s.session_id === this.activeSession
       ) || null;
+    },
+    get buttonLayout() {
+      if (this._slashNav) return "slash";
+      if (this._scrollFar) return "scroll";
+      if (
+        this.uiState === "selection" &&
+        !this._selectionDismissed
+      )
+        return "selection";
+      return "normal";
     },
     formatEndedAt(ts) {
       if (!ts) return "";
@@ -111,7 +124,16 @@ document.addEventListener("alpine:init", () => {
             target.scrollHeight -
             target.scrollTop -
             target.clientHeight;
-          this._pinned = gap < 50;
+          // Skip re-pin when a manual jump just
+          // happened (jumpToPrevPrompt sets this)
+          if (this._jumpGuard) {
+            this._jumpGuard = false;
+          } else {
+            this._pinned = gap < 50;
+          }
+          this._nearTop = target.scrollTop < 100;
+          this._scrollFar =
+            gap > target.clientHeight * 2;
           this._updateScrollTimestamp(target);
         });
 
@@ -359,6 +381,7 @@ document.addEventListener("alpine:init", () => {
       )
         return;
       await this.sendToSession(cmd.text);
+      if (cmd.nav) this._slashNav = true;
     },
 
     debugSession() {
@@ -428,12 +451,15 @@ document.addEventListener("alpine:init", () => {
         ];
         this.earliestTs = data.earliest_ts;
 
-        // Adjust scroll so content doesn't jump
+        // Adjust scroll so content doesn't jump.
+        // await ensures adjustment completes before
+        // loadHistory returns (callers can rely on
+        // scrollTop being correct).
         if (before && scrollEl) {
-          this.$nextTick(() => {
-            const diff = scrollEl.scrollHeight - prevHeight;
-            scrollEl.scrollTop += diff;
-          });
+          await this.$nextTick();
+          const diff =
+            scrollEl.scrollHeight - prevHeight;
+          scrollEl.scrollTop += diff;
         }
       } finally {
         this.historyLoading = false;
@@ -491,11 +517,128 @@ document.addEventListener("alpine:init", () => {
       }
       if (ts) {
         this.scrollTimestamp = this.formatChunkTs(ts);
-        // Auto-hide after 1.5s of no scrolling
         clearTimeout(this._scrollTsTimer);
         this._scrollTsTimer = setTimeout(() => {
           this.scrollTimestamp = "";
         }, 1500);
+      } else {
+        this.scrollTimestamp = "";
+      }
+    },
+
+    // Returns [{key, y}, ...] sorted by y.
+    // key = 60-char text snippet (stable anchor).
+    _findPrompts(c) {
+      const cTop = c.getBoundingClientRect().top;
+      const walker = document.createTreeWalker(
+        c,
+        NodeFilter.SHOW_TEXT
+      );
+      // First-wins: keeps topmost occurrence so
+      // history prompts aren't overwritten by
+      // duplicates in live content.
+      const seen = new Map();
+      let node;
+      while ((node = walker.nextNode())) {
+        const text = node.textContent;
+        // ❯ = Claude Code, › (U+203A) = Codex
+        // \s not literal space — tmux renders
+        // NBSP (U+00A0) after the prompt char.
+        const re = /(^|\n)\s*[❯›]\s/g;
+        let m;
+        while ((m = re.exec(text))) {
+          const idx =
+            m.index + m[0].length - 2;
+          const key = text
+            .substring(idx, idx + 60)
+            .trim();
+          const range = document.createRange();
+          range.setStart(node, idx);
+          range.setEnd(node, idx + 1);
+          const r = range.getBoundingClientRect();
+          const y = r.top - cTop + c.scrollTop;
+          if (!seen.has(key))
+            seen.set(key, { key, y });
+          range.detach();
+        }
+      }
+      return [...seen.values()].sort(
+        (a, b) => a.y - b.y
+      );
+    },
+
+    async jumpToPrevPrompt() {
+      const c = this.$refs.terminalScroll;
+      if (!c) return;
+      const viewTop = c.scrollTop;
+      const found = this._findPrompts(c);
+      const above = found.filter(
+        (p) => p.y < viewTop - 10
+      );
+
+      if (above.length) {
+        // Normal: jump to nearest prompt above
+        const t = above[above.length - 1].y;
+        this._pinned = false;
+        this._jumpGuard = true;
+        c.scrollTop = t - 20;
+        this._updateScrollTimestamp(c);
+        return;
+      }
+
+      // No prompts above — load history batches
+      // until new prompts appear or exhausted.
+      if (
+        this.historyExhausted ||
+        !this.activeSession
+      )
+        return;
+
+      const oldKeys = new Set(
+        found.map((p) => p.key)
+      );
+      let attempts = 0;
+      while (
+        attempts < 5 &&
+        !this.historyExhausted
+      ) {
+        attempts++;
+        await this.loadHistory(
+          this.activeSession,
+          this.earliestTs
+        );
+        const fresh = this._findPrompts(c);
+        const novel = fresh.filter(
+          (p) => !oldKeys.has(p.key)
+        );
+        if (novel.length) {
+          // Jump to the most recent new prompt
+          // (highest y = closest to user).
+          const t =
+            novel[novel.length - 1].y;
+          this._pinned = false;
+          this._jumpGuard = true;
+          c.scrollTop = t - 20;
+          this._updateScrollTimestamp(c);
+          return;
+        }
+      }
+    },
+
+    jumpToNextPrompt() {
+      const c = this.$refs.terminalScroll;
+      if (!c) return;
+      const viewTop = c.scrollTop;
+      const found = this._findPrompts(c);
+      const below = found.filter(
+        (p) => p.y > viewTop + c.clientHeight + 10
+      );
+      if (below.length) {
+        const t = below[0].y;
+        this._pinned = false;
+        this._jumpGuard = true;
+        c.scrollTop = t - 20;
+        this._updateScrollTimestamp(c);
       }
     },
 
@@ -508,57 +651,25 @@ document.addEventListener("alpine:init", () => {
       }, 100);
     },
 
-    toggleVoice() {
-      if (
-        !(
-          "webkitSpeechRecognition" in window ||
-          "SpeechRecognition" in window
-        )
-      ) {
-        alert("Voice input not supported in this browser");
+    async pasteImage(event) {
+      const file = event.target.files?.[0];
+      if (!file || !this.activeSession) return;
+      if (!window.confirm("Send image to agent?")) {
+        event.target.value = "";
         return;
       }
-      if (this.listening) {
-        this.recognition.stop();
-        this.listening = false;
-        return;
+      const form = new FormData();
+      form.append("file", file);
+      const resp = await fetch(
+        `/api/v1/sessions/${this.activeSession}/image`,
+        { method: "POST", body: form }
+      );
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        alert(err.detail || "Image paste failed");
       }
-      const SR =
-        window.SpeechRecognition ||
-        window.webkitSpeechRecognition;
-      this.recognition = new SR();
-      this.recognition.continuous = false;
-      this.recognition.interimResults = false;
-      this.recognition.onresult = (event) => {
-        const text = event.results[0][0].transcript;
-        const el = this.$refs.messageInput;
-        const start = el.selectionStart;
-        const end = el.selectionEnd;
-        this.inputText =
-          this.inputText.slice(0, start) +
-          text +
-          this.inputText.slice(end);
-        this.$nextTick(() => {
-          const pos = start + text.length;
-          el.setSelectionRange(pos, pos);
-          el.focus();
-        });
-        this.listening = false;
-      };
-      this.recognition.onerror = (event) => {
-        this.listening = false;
-        if (event.error !== "aborted") {
-          console.error(
-            "Speech recognition error:",
-            event.error
-          );
-        }
-      };
-      this.recognition.onend = () => {
-        this.listening = false;
-      };
-      this.recognition.start();
-      this.listening = true;
+      event.target.value = "";
+      this._triggerPoll();
     },
   }));
 });
