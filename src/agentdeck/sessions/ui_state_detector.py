@@ -12,7 +12,7 @@ from agentdeck.sessions.models import (
 _ITEM_RE = re.compile(r"^(?P<prefix>\s*[›❯]?\s*)(?P<num>\d+)\.\s+(?P<label>.+)$")
 
 # Horizontal rule made of ─ (box-drawing char)
-_HRULE_RE = re.compile(r"^[\s]*[─]{3,}[\s]*$")
+_HRULE_RE = re.compile(r"^[\s]*[─╌╍┄┅┈┉━]{3,}[\s]*$")
 
 # Footer line that confirms this is a selection prompt
 # Matches: "Enter to select · ↑/↓ to navigate · Esc to cancel"

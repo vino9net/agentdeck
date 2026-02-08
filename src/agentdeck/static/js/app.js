@@ -527,38 +527,79 @@ document.addEventListener("alpine:init", () => {
         window.SpeechRecognition ||
         window.webkitSpeechRecognition;
       this.recognition = new SR();
-      this.recognition.continuous = false;
-      this.recognition.interimResults = false;
+      this.recognition.continuous = true;
+      this.recognition.interimResults = true;
+      this._voiceBase = this.inputText;
+      this._voiceCursor = this.$refs.messageInput.selectionStart;
       this.recognition.onresult = (event) => {
-        const text = event.results[0][0].transcript;
-        const el = this.$refs.messageInput;
-        const start = el.selectionStart;
-        const end = el.selectionEnd;
-        this.inputText =
-          this.inputText.slice(0, start) +
-          text +
-          this.inputText.slice(end);
+        let final = "";
+        let interim = "";
+        for (let i = 0; i < event.results.length; i++) {
+          const r = event.results[i];
+          if (r.isFinal) {
+            final += r[0].transcript;
+          } else {
+            interim += r[0].transcript;
+          }
+        }
+        const before = this._voiceBase.slice(
+          0, this._voiceCursor
+        );
+        const after = this._voiceBase.slice(
+          this._voiceCursor
+        );
+        this.inputText = before + final + interim + after;
         this.$nextTick(() => {
-          const pos = start + text.length;
+          const el = this.$refs.messageInput;
+          const pos = before.length + final.length
+            + interim.length;
           el.setSelectionRange(pos, pos);
-          el.focus();
+          el.style.height = "auto";
+          el.style.height = el.scrollHeight + "px";
         });
-        this.listening = false;
       };
       this.recognition.onerror = (event) => {
-        this.listening = false;
         if (event.error !== "aborted") {
           console.error(
             "Speech recognition error:",
             event.error
           );
         }
+        this.listening = false;
       };
       this.recognition.onend = () => {
+        // Restart if user hasn't tapped stop
+        if (this.listening) {
+          try { this.recognition.start(); } catch (_) {
+            this.listening = false;
+          }
+          return;
+        }
         this.listening = false;
       };
       this.recognition.start();
       this.listening = true;
+    },
+
+    async pasteImage(event) {
+      const file = event.target.files?.[0];
+      if (!file || !this.activeSession) return;
+      if (!window.confirm("Send image to agent?")) {
+        event.target.value = "";
+        return;
+      }
+      const form = new FormData();
+      form.append("file", file);
+      const resp = await fetch(
+        `/api/v1/sessions/${this.activeSession}/image`,
+        { method: "POST", body: form }
+      );
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        alert(err.detail || "Image paste failed");
+      }
+      event.target.value = "";
+      this._triggerPoll();
     },
   }));
 });

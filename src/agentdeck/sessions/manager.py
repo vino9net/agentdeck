@@ -12,6 +12,7 @@ from agentdeck.agents.base import BaseAgent
 from agentdeck.agents.claude_code import ClaudeCodeAgent
 from agentdeck.agents.codex import CodexAgent
 from agentdeck.sessions.agent_output_log import AgentOutputLog
+from agentdeck.sessions.clipboard import copy_image_to_clipboard
 from agentdeck.sessions.models import (
     AgentType,
     ParsedOutput,
@@ -294,6 +295,24 @@ class SessionManager:
             keys,
             enter=enter,
             literal=True,
+        )
+
+    async def paste_image(self, session_id: str, path: str, fmt: str) -> None:
+        """Copy image to clipboard and paste into session.
+
+        Args:
+            session_id: Target session.
+            path: Absolute path to the image file.
+            fmt: Image format — "png" or "jpeg".
+        """
+        self._require_alive_session(session_id)
+        await asyncio.to_thread(copy_image_to_clipboard, path, fmt)
+        await asyncio.sleep(0.1)
+        await asyncio.to_thread(
+            self._tmux.send_keys,
+            session_id,
+            "C-v",
+            enter=False,
         )
 
     async def send_selection(

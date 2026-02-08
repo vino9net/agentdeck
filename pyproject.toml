@@ -1,6 +1,6 @@
 [project]
 name = "agentdeck"
-version = "0.9.0"
+version = "0.9.1"
 description = "Server for remote access to coding agents on local machine"
 requires-python = ">=3.13"
 dependencies = [
@@ -13,6 +13,7 @@ dependencies = [
     "libtmux>=0.37,<1",
     "jinja2>=3.1,<4",
     "pyyaml>=6.0,<7",
+    "python-multipart>=0.0.7,<1",
 ]
 
 
@@ -93,16 +94,18 @@ ignore = ["E203", "E266", "S101", "S108"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S311"]
+"src/agentdeck/sessions/clipboard.py" = ["S603", "S607"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 15
 
 [tool.deptry.per_rule_ignores]
 DEP002 = [
-    "python-dotenv",  # loaded via pydantic-settings
-    "uvicorn",        # ASGI server, run as CLI
-    "jinja2",         # used by FastAPI/Starlette templates
-    "pyyaml",         # used by shortcuts config loader
+    "python-dotenv",      # loaded via pydantic-settings
+    "uvicorn",            # ASGI server, run as CLI
+    "jinja2",             # used by FastAPI/Starlette templates
+    "pyyaml",             # used by shortcuts config loader
+    "python-multipart",   # required by FastAPI UploadFile
 ]
 DEP003 = [
     "agentdeck",  # self-imports

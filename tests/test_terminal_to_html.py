@@ -103,6 +103,44 @@ def test_square_panel_produces_div():
     assert "<table" not in result
 
 
+# ── Table nested inside panel ────────────────────────────────
+
+
+PANEL_WITH_TABLE = """\
+╭──────────────────────────────────────╮
+│ Template changes needed              │
+│ ┌──────────┬──────────┬──────────┐   │
+│ │ What     │ v4       │ v5       │   │
+│ ├──────────┼──────────┼──────────┤   │
+│ │ Form     │ form-ctl │ fieldset │   │
+│ │ Input    │ bordered │ remove   │   │
+│ └──────────┴──────────┴──────────┘   │
+╰──────────────────────────────────────╯"""
+
+
+def test_panel_with_table_renders_both():
+    result = str(_terminal_to_html(PANEL_WITH_TABLE))
+    assert '<div class="terminal-panel">' in result
+    assert '<table class="terminal-table">' in result
+
+
+def test_panel_with_table_has_label():
+    result = str(_terminal_to_html(PANEL_WITH_TABLE))
+    assert "Template changes needed" in result
+
+
+def test_panel_with_table_has_cells():
+    result = str(_terminal_to_html(PANEL_WITH_TABLE))
+    assert "<th>What</th>" in result
+    assert "<td>fieldset</td>" in result
+
+
+def test_panel_with_table_strips_box_drawing():
+    result = str(_terminal_to_html(PANEL_WITH_TABLE))
+    for ch in "╭╮╰╯┌┬┐├┼┤└┴┘─│":
+        assert ch not in result
+
+
 # ── Mixed content ────────────────────────────────────────────
 
 
@@ -131,6 +169,16 @@ def test_mixed_preserves_plain_text():
 def test_mixed_converts_hrule():
     result = str(_terminal_to_html(MIXED))
     assert '<hr class="terminal-hr">' in result
+
+
+def test_dashed_hrule_variants():
+    """All box-drawing dash chars become <hr>."""
+    for ch in "─╌╍┄┅┈┉━":
+        line = ch * 20
+        result = str(_terminal_to_html(line))
+        assert '<hr class="terminal-hr">' in result, (
+            f"U+{ord(ch):04X} ({ch}) not recognized as hrule"
+        )
 
 
 def test_mixed_converts_panel_and_table():

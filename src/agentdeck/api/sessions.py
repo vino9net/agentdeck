@@ -6,7 +6,13 @@ import re
 from pathlib import Path
 
 import structlog
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import HTMLResponse, Response
 from markupsafe import Markup
 from starlette.templating import Jinja2Templates
@@ -26,7 +32,7 @@ router = APIRouter()
 # Set by main.py during startup
 templates: Jinja2Templates | None = None
 
-_HRULE_RE = re.compile(r"^[\s]*[─]{3,}[\s]*$")
+_HRULE_RE = re.compile(r"^[\s]*[─╌╍┄┅┈┉━]{3,}[\s]*$")
 
 # Status-bar tokens right-aligned with long space runs; collapse them.
 #   "? for shortcuts"
@@ -97,19 +103,22 @@ def _render_table(lines: list[str]) -> str:
 
 
 def _render_panel(lines: list[str]) -> str:
-    """Convert box-drawing panel lines to an HTML div."""
+    """Convert box-drawing panel lines to an HTML div.
+
+    Inner content is fed back through _convert_blocks() so
+    nested tables, hrules, etc. are rendered properly.
+    """
     content_lines: list[str] = []
     for line in lines:
         m = _PANEL_MID_RE.match(line)
         if m:
-            # Strip one leading space if present (padding)
             text = m.group(1)
             if text.endswith(" "):
                 text = text[:-1]
             if text.startswith(" "):
                 text = text[1:]
-            content_lines.append(html.escape(text))
-    inner = "\n".join(content_lines)
+            content_lines.append(text)
+    inner = "\n".join(_convert_blocks(content_lines))
     return f'<div class="terminal-panel">{inner}</div>'
 
 
@@ -301,6 +310,47 @@ async def debug_session(
         original.agent_type,
     )
     return new_session
+
+
+_ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg"}
+_EXT_MAP = {"image/png": "png", "image/jpeg": "jpg"}
+
+
+@router.post("/{session_id}/image")
+async def paste_image(
+    session_id: str,
+    file: UploadFile,
+    request: Request,
+) -> dict[str, str]:
+    """Upload an image and paste it into the session."""
+    ct = file.content_type or ""
+    if ct not in _ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported image type: {ct}",
+        )
+
+    ext = _EXT_MAP[ct]
+    fmt = "jpeg" if ext == "jpg" else "png"
+    tmp_dir = Path("./tmp")
+    tmp_dir.mkdir(exist_ok=True)
+    tmp_path = tmp_dir / f"paste-{session_id}.{ext}"
+
+    try:
+        data = await file.read()
+        tmp_path.write_bytes(data)
+
+        mgr = _mgr(request)
+        try:
+            await mgr.paste_image(session_id, str(tmp_path.resolve()), fmt)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        return {"status": "pasted"}
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 @router.delete("/{session_id}")
