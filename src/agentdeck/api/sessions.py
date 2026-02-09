@@ -168,6 +168,29 @@ def _convert_blocks(lines: list[str]) -> list[str]:
             i = j + 1
             continue
 
+        # Headless panel: │...│ lines without a top border
+        # (top border was in a previous chunk)
+        if _PANEL_MID_RE.match(line):
+            block = [line]
+            j = i + 1
+            while j < len(lines):
+                if _PANEL_BOT_RE.match(lines[j].strip()):
+                    block.append(lines[j])
+                    break
+                if _PANEL_MID_RE.match(lines[j]):
+                    block.append(lines[j])
+                    j += 1
+                else:
+                    break
+            else:
+                # Reached end without bottom border
+                j = i + len(block)
+            if block and (j < len(lines) or _PANEL_BOT_RE.match(block[-1].strip())):
+                result.append(_render_panel(block))
+                i = j + 1
+                continue
+            # Not a panel — fall through
+
         # Regular line — hrule or escaped text
         if _HRULE_RE.match(line):
             result.append('<hr class="terminal-hr">')

@@ -190,6 +190,39 @@ def test_mixed_converts_panel_and_table():
 # ── Plain text passthrough ───────────────────────────────────
 
 
+# ── Headless panel (no top border) ───────────────────────────
+
+
+HEADLESS_PANEL = """\
+│ Verification          │
+│                       │
+│ 1. Check SVG icons    │
+│ 2. Test popover       │
+╰───────────────────────╯"""
+
+
+def test_headless_panel_produces_div():
+    """Panel without top border is still rendered as a panel."""
+    result = str(_terminal_to_html(HEADLESS_PANEL))
+    assert '<div class="terminal-panel">' in result
+
+
+def test_headless_panel_contains_content():
+    result = str(_terminal_to_html(HEADLESS_PANEL))
+    assert "Verification" in result
+    assert "Check SVG icons" in result
+    assert "Test popover" in result
+
+
+def test_headless_panel_strips_box_drawing():
+    result = str(_terminal_to_html(HEADLESS_PANEL))
+    for ch in "╰╯│─":
+        assert ch not in result
+
+
+# ── Plain text passthrough ───────────────────────────────────
+
+
 def test_plain_text_is_escaped():
     result = str(_terminal_to_html("<script>alert(1)</script>"))
     assert "<script>" not in result

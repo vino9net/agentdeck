@@ -13,10 +13,15 @@ document.addEventListener("alpine:init", () => {
     selectionItems: [],
     selectedIndex: 0,
     selectionQuestion: "",
-    freeformText: "",
     slashCommands: [],
+    _snippetsConfig: { global: [], directories: {} },
     showDebugModal: false,
     debugDescription: "",
+
+    // Attach button long-press popover
+    _attachPopoverOpen: false,
+    _attachLongPressTimer: null,
+    _attachLongPressed: false,
 
     // Slash-command nav mode
     _slashNav: false,
@@ -65,6 +70,15 @@ document.addEventListener("alpine:init", () => {
         return "selection";
       return "normal";
     },
+    get promptSnippets() {
+      const g = this._snippetsConfig.global || [];
+      const info = this.activeSessionInfo;
+      const dir = info?.working_dir;
+      const dirs = this._snippetsConfig.directories || {};
+      const d = dir && dirs[dir] ? dirs[dir] : [];
+      return [...g, ...d];
+    },
+
     formatEndedAt(ts) {
       if (!ts) return "";
       const d = new Date(ts * 1000);
@@ -176,9 +190,6 @@ document.addEventListener("alpine:init", () => {
           this.selectionItems = data.items || [];
           this.selectedIndex = data.selected_index || 0;
           this.selectionQuestion = data.question || "";
-          if (data.state !== "selection") {
-            this.freeformText = "";
-          }
         } catch {
           // Ignore parse errors
         }
@@ -188,6 +199,9 @@ document.addEventListener("alpine:init", () => {
         ? JSON.parse(this.$el.dataset.sessions)
         : [];
       this.sessions = initialSessions;
+      this._snippetsConfig = this.$el.dataset.snippets
+        ? JSON.parse(this.$el.dataset.snippets)
+        : { global: [], directories: {} };
       this.refreshSessions();
       this.refreshRecentDirs();
       this.refreshSlashCommands();
@@ -312,6 +326,16 @@ document.addEventListener("alpine:init", () => {
     sendMessage() {
       const text = this.inputText.trim();
       if (!text || !this.activeSession) return;
+      // Route freeform input to selectOption when in selection mode
+      if (this.buttonLayout === "selection") {
+        const freeItem = this.selectionItems.find(
+          (i) => i.is_freeform
+        );
+        if (freeItem) {
+          this.selectOption(freeItem.number, true);
+          return;
+        }
+      }
       this.sendToSession(text);
       this.inputText = "";
       const el = this.$refs.messageInput;
@@ -339,8 +363,8 @@ document.addEventListener("alpine:init", () => {
     async selectOption(itemNumber, isFreeform) {
       if (!this.activeSession) return;
       const body = { item_number: itemNumber };
-      if (isFreeform && this.freeformText.trim()) {
-        body.freeform_text = this.freeformText.trim();
+      if (isFreeform && this.inputText.trim()) {
+        body.freeform_text = this.inputText.trim();
       }
       await fetch(
         `/api/v1/sessions/${this.activeSession}/select`,
@@ -350,7 +374,9 @@ document.addEventListener("alpine:init", () => {
           body: JSON.stringify(body),
         }
       );
-      this.freeformText = "";
+      this.inputText = "";
+      const el = this.$refs.messageInput;
+      if (el) el.style.height = "auto";
       this._triggerPoll();
     },
 
@@ -382,6 +408,40 @@ document.addEventListener("alpine:init", () => {
         return;
       await this.sendToSession(cmd.text);
       if (cmd.nav) this._slashNav = true;
+    },
+
+    insertSnippet(text) {
+      const el = this.$refs.messageInput;
+      if (!el) return;
+      const start = el.selectionStart || 0;
+      const before = this.inputText.slice(0, start);
+      const after = this.inputText.slice(start);
+      this.inputText = before + text + after;
+      this.$nextTick(() => {
+        const pos = start + text.length;
+        el.selectionStart = pos;
+        el.selectionEnd = pos;
+        el.style.height = "auto";
+        el.style.height = el.scrollHeight + "px";
+        el.focus();
+      });
+    },
+
+    attachPointerDown() {
+      this._attachLongPressed = false;
+      this._attachLongPressTimer = setTimeout(() => {
+        this._attachLongPressed = true;
+        this._attachPopoverOpen = true;
+      }, 400);
+    },
+
+    attachPointerUp() {
+      clearTimeout(this._attachLongPressTimer);
+      if (this._attachLongPressed) {
+        this._attachLongPressed = false;
+        return;
+      }
+      this._attachPopoverOpen = !this._attachPopoverOpen;
     },
 
     debugSession() {

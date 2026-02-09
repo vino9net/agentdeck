@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import re
 from collections.abc import AsyncGenerator
@@ -6,6 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import structlog
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import (
@@ -30,6 +32,8 @@ from agentdeck.sessions.tmux_backend import (
 logger = structlog.get_logger()
 
 _POLL_RE = re.compile(r"/api/v1/sessions/[^/]+/output")
+
+load_dotenv()
 
 
 def _infer_agent_type(session_id: str) -> AgentType:
@@ -186,6 +190,17 @@ def create_app() -> FastAPI:
 app = create_app()
 
 
+def _load_snippets(state_dir: str) -> dict:
+    """Read prompt_snippets.json from state dir."""
+    path = Path(state_dir) / "prompt_snippets.json"
+    if not path.exists():
+        return {"global": [], "directories": {}}
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {"global": [], "directories": {}}
+
+
 @app.get("/")
 async def index(request: Request):  # type: ignore[no-untyped-def]
     """Serve the main PWA page."""
@@ -193,6 +208,7 @@ async def index(request: Request):  # type: ignore[no-untyped-def]
     logger.debug("page_load", session=session)
     settings = get_settings()
     sessions = await request.app.state.session_manager.list_sessions()
+    snippets = _load_snippets(settings.state_dir)
     return templates.TemplateResponse(
         "index.html",
         {
@@ -200,5 +216,6 @@ async def index(request: Request):  # type: ignore[no-untyped-def]
             "sessions": [s.model_dump() for s in sessions],
             "default_working_dir": settings.default_working_dir,
             "session_refresh_ms": settings.session_refresh_ms,
+            "prompt_snippets": snippets,
         },
     )

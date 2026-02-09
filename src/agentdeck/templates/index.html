@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div x-data="codeServer()" class="flex flex-col fixed inset-0" data-sessions='{{ sessions | tojson }}' data-session-refresh-ms="{{ session_refresh_ms }}">
+<div x-data="codeServer()" class="flex flex-col fixed inset-0" data-sessions='{{ sessions | tojson }}' data-session-refresh-ms="{{ session_refresh_ms }}" data-snippets='{{ prompt_snippets | tojson }}'>
     <!-- Top navbar -->
     <div class="navbar bg-base-100 shadow-lg px-4">
         <div class="flex-1 flex items-center gap-1">
             <button class="btn btn-ghost btn-sm btn-square"
                     @click="location.reload()"
                     title="Refresh page">
-                <svg class="w-4 h-4" fill="none"
+                <svg class="w-5 h-5" fill="none"
                      stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round"
                           stroke-linejoin="round"
@@ -176,86 +176,101 @@
         </div>
         <!-- Floating nav for dead sessions -->
         <div x-show="activeSession && !isActiveSessionAlive"
-             class="absolute bottom-2 left-1/2 -translate-x-1/2 z-10
+             class="absolute bottom-2 left-1/2 -translate-x-1/2
+                    md:left-5/6 z-10
                     flex gap-1 px-2 py-1 rounded-full
                     bg-base-300/80 backdrop-blur shadow-lg">
-            <button class="btn btn-sm btn-square btn-ghost"
-                    @click="jumpToPrevPrompt()">&#x2191;</button>
-            <button class="btn btn-sm btn-square btn-ghost"
-                    @click="jumpToNextPrompt()">&#x2193;</button>
-            <button class="btn btn-sm btn-square btn-ghost"
-                    @click="_pinned=true; $refs.terminalScroll.scrollTop=$refs.terminalScroll.scrollHeight">&#x25BC;</button>
-        </div>
-    </div>
-
-    <!-- Selection overlay (only for alive sessions) -->
-    <div class="p-2 bg-base-300 border-t border-base-content/10"
-         x-show="isActiveSessionAlive && buttonLayout === 'selection'"
-         x-transition>
-        <div class="flex gap-1 mb-1 overflow-x-auto">
-            <template x-for="item in selectionItems.filter(i => !i.is_freeform)" :key="item.number">
-                <button class="btn btn-sm btn-outline"
-                        @click="selectOption(item.number)"
-                        :disabled="!connected"
-                        x-text="item.number">
-                </button>
-            </template>
-            <button class="btn btn-sm btn-ghost whitespace-nowrap"
-                    @click="uiState = 'working'; _selectionDismissed = true"
-                    title="Switch to manual input">
-                ...
+            <button class="btn btn-md btn-square btn-ghost"
+                    @click="jumpToPrevPrompt()">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 19V5"/><path d="M5 12l7-7 7 7"/>
+                </svg>
+            </button>
+            <button class="btn btn-md btn-square btn-ghost"
+                    @click="jumpToNextPrompt()">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/>
+                </svg>
+            </button>
+            <button class="btn btn-md btn-square btn-ghost"
+                    @click="_pinned=true; $refs.terminalScroll.scrollTop=$refs.terminalScroll.scrollHeight">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M6 9l6 6 6-6"/>
+                </svg>
             </button>
         </div>
-        <template x-if="selectionItems.some(i => i.is_freeform)">
-            <form class="flex gap-2" @submit.prevent="selectOption(selectionItems.find(i => i.is_freeform).number, true)">
-                <input type="text"
-                       x-model="freeformText"
-                       placeholder="Type something..."
-                       class="input input-sm flex-1"
-                       :disabled="!connected">
-                <button type="submit" class="btn btn-sm btn-primary"
-                        :disabled="!connected || !freeformText.trim()">
-                    Send
-                </button>
-            </form>
-        </template>
     </div>
 
     <!-- Input bar (only for alive sessions) -->
     <div class="px-4 py-2 bg-base-200"
-         x-show="isActiveSessionAlive && buttonLayout !== 'selection'">
+         x-show="isActiveSessionAlive">
         <!-- Shortcut buttons -->
         <div class="flex gap-1 mb-1">
             <div class="flex gap-1 overflow-x-auto">
-                <!-- Shared: always visible -->
-                <button class="btn btn-sm btn-square btn-warning"
+                <!-- Shared: visible in all layouts except selection -->
+                <button x-show="buttonLayout !== 'selection'"
+                        class="btn btn-sm btn-square btn-warning"
                         @click="_slashNav = false; sendShortcut('stop')"
                         :disabled="!connected"
                         title="Escape">
-                    <span class="text-[0.6rem] font-bold leading-none">ESC</span>
+                    <span class="text-lg leading-none">⎋</span>
                 </button>
-                <button class="btn btn-sm btn-square btn-outline"
+                <button x-show="buttonLayout !== 'selection'"
+                        class="btn btn-sm btn-square btn-outline"
                         @click="buttonLayout === 'scroll' ? jumpToPrevPrompt() : sendShortcut('up')"
-                        :disabled="!connected">&#x2191;</button>
-                <button class="btn btn-sm btn-square btn-outline"
+                        :disabled="!connected">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 19V5"/><path d="M5 12l7-7 7 7"/>
+                    </svg>
+                </button>
+                <button x-show="buttonLayout !== 'selection'"
+                        class="btn btn-sm btn-square btn-outline"
                         @click="buttonLayout === 'scroll' ? jumpToNextPrompt() : sendShortcut('down')"
-                        :disabled="!connected">&#x2193;</button>
+                        :disabled="!connected">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/>
+                    </svg>
+                </button>
+
+                <!-- Selection layout: numbered picks + dismiss -->
+                <template x-for="item in selectionItems.filter(i => !i.is_freeform)" :key="item.number">
+                    <button x-show="buttonLayout === 'selection'"
+                            class="btn btn-sm btn-outline"
+                            @click="selectOption(item.number)"
+                            :disabled="!connected"
+                            x-text="item.number">
+                    </button>
+                </template>
+                <button x-show="buttonLayout === 'selection'"
+                        class="btn btn-sm btn-ghost"
+                        @click="uiState = 'working'; _selectionDismissed = true"
+                        title="Dismiss selection">
+                    ...
+                </button>
 
                 <!-- Slash layout: arrow nav + enter -->
                 <button x-show="buttonLayout === 'slash'"
                         class="btn btn-sm btn-square btn-outline"
                         @click="sendShortcut('left')"
-                        :disabled="!connected">&#x2190;</button>
+                        :disabled="!connected">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M19 12H5"/><path d="M12 5l-7 7 7 7"/>
+                    </svg>
+                </button>
                 <button x-show="buttonLayout === 'slash'"
                         class="btn btn-sm btn-square btn-outline"
                         @click="sendShortcut('right')"
-                        :disabled="!connected">&#x2192;</button>
+                        :disabled="!connected">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M5 12h14"/><path d="M12 5l7 7-7 7"/>
+                    </svg>
+                </button>
                 <button x-show="buttonLayout === 'slash'"
                         class="btn btn-sm btn-square btn-outline"
                         @click="sendShortcut('enter')"
                         :disabled="!connected"
                         title="Enter">
-                    <svg class="w-4 h-4 -translate-y-px" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                    <svg class="w-5 h-5 -translate-y-px" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M20 7v10H6"/><path d="M10 13l-5 4 5 4"/>
                     </svg>
                 </button>
@@ -266,7 +281,7 @@
                         @click="sendShortcut('enter')"
                         :disabled="!connected"
                         title="Enter">
-                    <svg class="w-4 h-4 -translate-y-px" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                    <svg class="w-5 h-5 -translate-y-px" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M20 7v10H6"/><path d="M10 13l-5 4 5 4"/>
                     </svg>
                 </button>
@@ -275,7 +290,7 @@
                         @click="sendShortcut('tab')"
                         :disabled="!connected"
                         title="Shift-Tab">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M4 12h11"/><path d="M11 6l6 6-6 6"/><path d="M20 5v14"/>
                     </svg>
                 </button>
@@ -284,7 +299,7 @@
                         @click="sendShortcut('cancel')"
                         :disabled="!connected"
                         title="Ctrl-C">
-                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
                         <rect x="4" y="4" width="16" height="16" rx="2"/>
                     </svg>
                 </button>
@@ -293,52 +308,33 @@
                 <button x-show="false"
                         @click="jumpToPrevPrompt()"
                         class="btn btn-sm btn-square btn-outline"
-                        title="Previous prompt">&#x2190;</button>
+                        title="Previous prompt">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M19 12H5"/><path d="M12 5l-7 7 7 7"/>
+                    </svg>
+                </button>
                 <button x-show="false"
                         @click="jumpToNextPrompt()"
                         class="btn btn-sm btn-square btn-outline"
-                        title="Next prompt">&#x2192;</button>
+                        title="Next prompt">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M5 12h14"/><path d="M12 5l7 7-7 7"/>
+                    </svg>
+                </button>
                 <button x-show="buttonLayout === 'scroll'"
                         @click="_pinned=true; $refs.terminalScroll.scrollTop=$refs.terminalScroll.scrollHeight"
                         class="btn btn-sm btn-square btn-outline ml-auto"
-                        title="Jump to bottom">&#x25BC;</button>
-            </div>
-            <div class="dropdown dropdown-top">
-                <button tabindex="0"
-                        class="btn btn-sm btn-square btn-ghost"
-                        :disabled="!connected"
-                        title="Slash commands">
-                    <span class="text-lg font-bold">/</span>
+                        title="Jump to bottom">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M6 9l6 6 6-6"/>
+                    </svg>
                 </button>
-                <ul tabindex="0"
-                    class="dropdown-content z-50 menu p-2 shadow-xl bg-base-200 rounded-box mb-2">
-                    <template x-for="cmd in slashCommands" :key="cmd.text">
-                        <li><a @click="sendSlashCommand(cmd)" x-text="cmd.text"></a></li>
-                    </template>
-                </ul>
             </div>
-            <button class="btn btn-sm btn-square btn-ghost flex-shrink-0"
-                    @click="debugSession()"
-                    :disabled="!connected"
-                    title="Debug session">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M8 2l1.88 1.88M14.12 3.88L16 2"/>
-                    <path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/>
-                    <path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/>
-                    <path d="M12 20v-9"/>
-                    <path d="M6.53 9C4.6 8.8 3 7.1 3 5"/>
-                    <path d="M6 13H2"/>
-                    <path d="M3 21c0-2.1 1.7-3.9 3.8-4"/>
-                    <path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"/>
-                    <path d="M22 13h-4"/>
-                    <path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/>
-                </svg>
-            </button>
             <button class="btn btn-sm btn-square btn-ghost flex-shrink-0"
                     :disabled="!connected"
                     @click="$refs.imageInput.click()"
-                    title="Paste image">
-                <svg class="w-4 h-4" fill="none"
+                    title="Attach image">
+                <svg class="w-5 h-5" fill="none"
                      stroke="currentColor" viewBox="0 0 24 24"
                      stroke-linecap="round"
                      stroke-linejoin="round"
@@ -346,6 +342,51 @@
                     <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
                 </svg>
             </button>
+            <div class="relative flex-shrink-0">
+                <button class="btn btn-sm btn-square btn-ghost"
+                        :disabled="!connected"
+                        @mousedown.prevent="attachPointerDown()"
+                        @mouseup="attachPointerUp()"
+                        @touchstart.prevent="attachPointerDown()"
+                        @touchend="attachPointerUp()"
+                        @contextmenu.prevent
+                        title="Slash commands (hold)">
+                    <span class="text-xl font-bold">/</span>
+                </button>
+                <div x-show="_attachPopoverOpen"
+                     x-transition:enter="transition ease-out duration-150"
+                     x-transition:enter-start="opacity-0 scale-95"
+                     x-transition:enter-end="opacity-100 scale-100"
+                     x-transition:leave="transition ease-in duration-100"
+                     x-transition:leave-start="opacity-100 scale-100"
+                     x-transition:leave-end="opacity-0 scale-95"
+                     @click.outside="_attachPopoverOpen = false"
+                     class="absolute bottom-full right-0 mb-2 z-50
+                            menu p-2 shadow-xl bg-base-200
+                            rounded-box min-w-48 text-base">
+                    <template x-for="cmd in slashCommands"
+                              :key="cmd.text">
+                        <li><a @click="_attachPopoverOpen = false;
+                                      sendSlashCommand(cmd)"
+                               x-text="cmd.text"></a></li>
+                    </template>
+                    <template x-if="promptSnippets.length">
+                        <li class="border-t border-base-content/10 mt-1 pt-1"></li>
+                    </template>
+                    <template x-for="snip in promptSnippets"
+                              :key="snip.label">
+                        <li><a @click="_attachPopoverOpen = false;
+                                      insertSnippet(snip.text)"
+                               x-text="snip.label"></a></li>
+                    </template>
+                    <li class="border-t border-base-content/10 mt-1 pt-1">
+                        <a @click="_attachPopoverOpen = false;
+                                  debugSession()">
+                            Debug this screen
+                        </a>
+                    </li>
+                </div>
+            </div>
         </div>
         <input type="file"
                accept="image/png,image/jpeg"
@@ -357,18 +398,18 @@
         <div class="flex gap-2 items-end">
             <textarea x-model="inputText"
                       placeholder="Type a message or command..."
-                      class="textarea flex-1 resize-none leading-snug"
+                      class="textarea textarea-sm flex-1 resize-none leading-snug"
                       rows="1"
                       :disabled="!connected"
                       x-ref="messageInput"
                       @keydown.enter="if(!$event.shiftKey&&matchMedia('(hover:hover)').matches){$event.preventDefault();sendMessage()}"
-                      style="max-height: 6lh"
+                      style="min-height: 2.75rem; max-height: 6lh"
                       @input="$el.style.height='auto';$el.style.height=$el.scrollHeight+'px'"></textarea>
             <button type="button"
                     class="btn btn-primary btn-sm btn-square"
                     :disabled="!connected || !inputText.trim()"
                     @click="sendMessage()">
-                <svg class="w-4 h-4" fill="none"
+                <svg class="w-5 h-5" fill="none"
                      stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round"
                           stroke-linejoin="round"

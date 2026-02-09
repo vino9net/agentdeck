@@ -37,6 +37,7 @@ You do not need to manually format files during development.
 
 ## Playwright (browser testing)
 
+- **Use a subagent** for Playwright work — snapshots and DOM output are very large and will bloat the main context. Run Playwright calls inside a Task agent and return a concise summary.
 - Primary test device: **Pixel 9** — viewport **443×908** CSS pixels
 - Always resize to mobile viewport before testing UI:
   `browser_resize(width=443, height=908)`

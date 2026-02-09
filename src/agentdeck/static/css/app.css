@@ -1,7 +1,7 @@
 .terminal-pre {
     font-family: "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
-    font-size: 11px;
-    line-height: 1.4;
+    font-size: 13px;
+    line-height: 1.45;
     tab-size: 8;
     overflow-wrap: break-word;
 }
@@ -71,10 +71,10 @@ textarea.textarea {
     border-bottom: 1px solid oklch(var(--color-base-content) / 0.08);
 }
 
-/* Mobile-friendly touch targets */
+/* Mobile-friendly touch targets (44px = Apple HIG minimum) */
 @media (max-width: 640px) {
     .btn-sm {
-        min-height: 2.5rem;
-        min-width: 2.5rem;
+        min-height: 2.75rem;
+        min-width: 2.75rem;
     }
 }

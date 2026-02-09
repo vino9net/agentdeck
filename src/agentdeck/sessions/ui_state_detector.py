@@ -74,6 +74,14 @@ class UIStateDetector:
           2. Selection — numbered list + navigation footer
           3. Prompt — default fallback
         """
+        # Debug captures inject </tmux-capture> as a boundary.
+        # Everything before (and including) the tag belongs to
+        # another session — discard it.
+        tag = "</tmux-capture>"
+        tag_pos = raw.rfind(tag)
+        if tag_pos != -1:
+            raw = raw[tag_pos + len(tag) :]
+
         lines = raw.split("\n")
 
         # Strip trailing blank lines and agent status-bar
