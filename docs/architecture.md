@@ -11,6 +11,7 @@ so the browser can render appropriate controls.
 graph TD
     subgraph Browser
         HTMX["HTMX + Alpine.js"]
+        SW["Service Worker"]
     end
 
     subgraph Server ["FastAPI"]
@@ -20,6 +21,7 @@ graph TD
             Log["AgentOutputLog"]
         end
         TB["TmuxBackend"]
+        Push["PushNotifier"]
     end
 
     subgraph tmux ["tmux server"]
@@ -31,6 +33,7 @@ graph TD
     API --> SM
     SM --> TB
     TB --> tmux
+    Push -- "Web Push" --> SW
 ```
 
 ### How components connect
@@ -50,6 +53,9 @@ graph TD
 - **TmuxBackend → tmux** — `libtmux.Server` talks to the local tmux
   server process. Each session is an independent window that survives
   server restarts.
+- **PushNotifier → Service Worker** — the capture loop feeds parsed
+  UI state to the notifier, which sends Web Push messages via
+  `pywebpush`. The service worker displays them as OS notifications.
 
 ## Layers
 
@@ -66,6 +72,7 @@ Pydantic `BaseSettings`, loaded from env vars or `.env`.
 | `session_refresh_ms` | 3000 | Frontend session-list poll interval |
 | `default_working_dir` | `$HOME` | Fallback for new sessions |
 | `state_dir` | `state` | Persistent storage (DB, recent dirs) |
+| `public_url` | `https://code.vino9.net` | Public URL for push notification links |
 
 ### 2. Tmux backend — `sessions/tmux_backend.py`
 
@@ -440,6 +447,108 @@ simultaneously:
 This is by design for the single-user, single-machine use case.
 For multi-user deployments, restrict access at the network layer
 or add session-level locking in a future version.
+
+## Push notifications
+
+Web Push notifications alert the user when an agent session
+needs input — so they don't have to keep the browser open.
+Notifications fire when a session transitions into PROMPT or
+SELECTION state and are suppressed if the app is focused.
+
+### Components
+
+```
+notifications/
+├── vapid.py    # VAPID key generation + loading
+├── store.py    # JSON-file subscription store
+└── push.py     # State-gated push delivery
+api/
+└── notifications.py  # REST endpoints
+static/
+└── sw.js       # Service worker
+```
+
+### VAPID keys — `notifications/vapid.py`
+
+On first run, generates an EC P-256 key pair using `py_vapid`
+and persists it to `state/vapid_private.pem` +
+`state/vapid_keys.json`. Subsequent starts load from disk.
+The public key is served to browsers for `pushManager.subscribe()`.
+
+### Subscription store — `notifications/store.py`
+
+`PushSubscriptionStore` — a JSON-file-backed store at
+`state/push_subscriptions.json`. Each entry is an
+`(endpoint, p256dh, auth, session_id)` tuple. The browser
+subscribes per-session, so one device can watch multiple
+sessions.
+
+Operations: `subscribe` (upsert), `unsubscribe` (single
+session), `remove_endpoint` (all sessions for a dead endpoint),
+`get_subscriptions_for_session`, `get_session_ids_for_endpoint`.
+
+Designed for single-user usage with a handful of subscriptions.
+No locking — all access runs on the async event loop.
+
+### Push delivery — `notifications/push.py`
+
+`PushNotifier` tracks the last known `UIState` per session.
+It only sends a push when the state transitions *into*
+`PROMPT` or `SELECTION` from a different state. Same-state
+repeats are suppressed.
+
+On delivery failure, 404/410 responses trigger automatic
+endpoint removal from the store (browser unsubscribed or
+subscription expired).
+
+### Notification API — `api/notifications.py`
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v1/notifications/vapid-key` | VAPID application server key |
+| POST | `/api/v1/notifications/subscribe` | Register push for a session |
+| POST | `/api/v1/notifications/unsubscribe` | Remove push for a session |
+| GET | `/api/v1/notifications/subscriptions` | Session IDs for an endpoint |
+
+### Service worker — `static/sw.js`
+
+Registered at root scope (`/sw.js` served via a dedicated
+route with `Service-Worker-Allowed: /`).
+
+- **Push handler** — suppresses notification if any app window
+  is focused. Otherwise shows a notification with the app icon,
+  tagged by session ID (so newer notifications replace older
+  ones for the same session via `renotify: true`).
+- **Click handler** — focuses an existing app window and
+  navigates to the session URL, or opens a new window if none
+  exists.
+
+### Integration with capture loop
+
+The background capture loop (`_capture_loop` in `main.py`)
+drives push notifications alongside output capture:
+
+1. For each active session, capture scrollback to the log.
+2. Capture the visible pane, parse it with `UIStateDetector`.
+3. Fire `PushNotifier.check_and_notify()` in a background task.
+
+Push delivery runs in `asyncio.to_thread()` since `pywebpush`
+is synchronous. Errors are logged but never block the capture
+loop.
+
+### Frontend integration
+
+The Alpine.js component tracks per-session notification state
+in `_notifiedSessions` (a `Set` of session IDs). On init, it
+queries the server for existing subscriptions. The "Enable/
+Disable notifications" toggle appears in the attach menu and
+calls `toggleNotification()`, which handles permission request,
+push subscription creation, and server-side subscribe/
+unsubscribe.
+
+Notifications are only available when the app is served from
+the configured `public_url` (required for service worker scope
+matching).
 
 ## Design decisions
 

@@ -9,7 +9,7 @@ class Settings(BaseSettings):
 
     # API
     app_name: str = "agentdeck"
-    app_version: str = "0.8.0"
+    app_version: str = "0.9.4"
 
     # tmux
     tmux_pane_width: int = 160
@@ -26,11 +26,20 @@ class Settings(BaseSettings):
     default_working_dir: str = str(Path.home())
     state_dir: str = "state"
 
+    # Push notifications
+    agentdeck_url: str = "http://127.0.0.1"
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def db_path(self) -> Path:
         """SQLite database path for output log."""
         return Path(self.state_dir) / "output.db"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def push_subs_path(self) -> Path:
+        """JSON file for push subscriptions."""
+        return Path(self.state_dir) / "push_subscriptions.json"
 
     model_config = {
         "env_file": ".env",

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div x-data="codeServer()" class="flex flex-col fixed inset-0" data-sessions='{{ sessions | tojson }}' data-session-refresh-ms="{{ session_refresh_ms }}" data-snippets='{{ prompt_snippets | tojson }}'>
+<div x-data="codeServer()" class="flex flex-col fixed inset-x-0 top-0" style="height: calc(var(--app-height, 100vh))" data-sessions='{{ sessions | tojson }}' data-session-refresh-ms="{{ session_refresh_ms }}" data-snippets='{{ prompt_snippets | tojson }}' data-public-url="{{ public_url }}">
     <!-- Top navbar -->
     <div class="navbar bg-base-100 shadow-lg px-4">
         <div class="flex-1 flex items-center gap-1">
@@ -379,6 +379,15 @@
                                       insertSnippet(snip.text)"
                                x-text="snip.label"></a></li>
                     </template>
+                    <li x-show="notificationsSupported"
+                        class="border-t border-base-content/10 mt-1 pt-1">
+                        <a @click="_attachPopoverOpen = false;
+                                  toggleNotification()">
+                            <span x-text="isSessionNotified
+                                ? 'Disable notifications'
+                                : 'Enable notifications'"></span>
+                        </a>
+                    </li>
                     <li class="border-t border-base-content/10 mt-1 pt-1">
                         <a @click="_attachPopoverOpen = false;
                                   debugSession()">
@@ -398,12 +407,12 @@
         <div class="flex gap-2 items-end">
             <textarea x-model="inputText"
                       placeholder="Type a message or command..."
-                      class="textarea textarea-sm flex-1 resize-none leading-snug"
-                      rows="1"
+                      class="textarea flex-1 resize-none leading-normal text-lg"
+                      rows="2"
                       :disabled="!connected"
                       x-ref="messageInput"
                       @keydown.enter="if(!$event.shiftKey&&matchMedia('(hover:hover)').matches){$event.preventDefault();sendMessage()}"
-                      style="min-height: 2.75rem; max-height: 6lh"
+                      style="font-family: system-ui, -apple-system, sans-serif; min-height: 3.5rem; max-height: 8lh"
                       @input="$el.style.height='auto';$el.style.height=$el.scrollHeight+'px'"></textarea>
             <button type="button"
                     class="btn btn-primary btn-sm btn-square"

@@ -195,6 +195,12 @@ class SessionManager:
         if self._output_log is None:
             return
 
+        alive = await asyncio.to_thread(self._tmux.is_alive, session_id)
+        if not alive:
+            logger.info("session_gone", session=session_id)
+            self._mark_dead(session_id)
+            return
+
         dead = await asyncio.to_thread(self._tmux.is_process_dead, session_id)
         if dead:
             logger.info(

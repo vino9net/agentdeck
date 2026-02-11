@@ -14,5 +14,10 @@
 <body class="min-h-screen bg-base-300">
     {% block content %}{% endblock %}
     <script src="/static/js/app.js"></script>
+    <script>
+    if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    }
+    </script>
 </body>
 </html>

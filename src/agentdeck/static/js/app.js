@@ -26,6 +26,11 @@ document.addEventListener("alpine:init", () => {
     // Slash-command nav mode
     _slashNav: false,
 
+    // Push notification state
+    _pushSubscription: null,
+    _notifiedSessions: new Set(),
+    _publicUrl: "",
+
     // History scrollback state
     _nearTop: true,
     _scrollFar: false,
@@ -78,6 +83,16 @@ document.addEventListener("alpine:init", () => {
       const d = dir && dirs[dir] ? dirs[dir] : [];
       return [...g, ...d];
     },
+    get notificationsSupported() {
+      if (!("PushManager" in window)) return false;
+      if (!("serviceWorker" in navigator)) return false;
+      if (!this._publicUrl) return false;
+      return window.location.origin === this._publicUrl;
+    },
+    get isSessionNotified() {
+      if (!this.activeSession) return false;
+      return this._notifiedSessions.has(this.activeSession);
+    },
 
     formatEndedAt(ts) {
       if (!ts) return "";
@@ -120,6 +135,29 @@ document.addEventListener("alpine:init", () => {
     },
 
     init() {
+      // Resize container to visual viewport so it stays
+      // above the mobile software keyboard.
+      if (window.visualViewport) {
+        const setAppHeight = () => {
+          document.documentElement.style.setProperty(
+            "--app-height",
+            `${window.visualViewport.height}px`
+          );
+          // Re-pin scroll after viewport shrinks (keyboard open)
+          if (this._pinned) {
+            requestAnimationFrame(() => {
+              const t = this.$refs.terminalScroll;
+              if (t) t.scrollTop = t.scrollHeight;
+            });
+          }
+        };
+        window.visualViewport.addEventListener(
+          "resize",
+          setAppHeight
+        );
+        setAppHeight();
+      }
+
       // Track connection state via HTMX polling results
       document.addEventListener("htmx:afterRequest", (evt) => {
         const tc = document.getElementById("terminal-container");
@@ -157,7 +195,9 @@ document.addEventListener("alpine:init", () => {
 
         const observer = new MutationObserver(() => {
           if (this._pinned && !this.historyLoading) {
-            target.scrollTop = target.scrollHeight;
+            requestAnimationFrame(() => {
+              target.scrollTop = target.scrollHeight;
+            });
           }
         });
         observer.observe(target, {
@@ -205,6 +245,12 @@ document.addEventListener("alpine:init", () => {
       this.refreshSessions();
       this.refreshRecentDirs();
       this.refreshSlashCommands();
+
+      // Push notifications
+      this._publicUrl = this.$el.dataset.publicUrl || "";
+      if (this.notificationsSupported) {
+        this._initPushState();
+      }
 
       // Poll session list to detect deaths
       const refreshMs =
@@ -276,8 +322,8 @@ document.addEventListener("alpine:init", () => {
       this.$nextTick(() => {
         this.activeSession = sessionId;
         this.refreshSlashCommands();
-        this.$nextTick(() => {
-          this.loadHistory(sessionId, null);
+        this.$nextTick(async () => {
+          await this.loadHistory(sessionId, null);
           this._setupHistoryObserver();
         });
       });
@@ -323,7 +369,7 @@ document.addEventListener("alpine:init", () => {
       }
     },
 
-    sendMessage() {
+    async sendMessage() {
       const text = this.inputText.trim();
       if (!text || !this.activeSession) return;
       // Route freeform input to selectOption when in selection mode
@@ -336,11 +382,13 @@ document.addEventListener("alpine:init", () => {
           return;
         }
       }
-      this.sendToSession(text);
-      this.inputText = "";
-      const el = this.$refs.messageInput;
-      el.style.height = "auto";
-      el.focus();
+      const ok = await this.sendToSession(text);
+      if (ok) {
+        this.inputText = "";
+        const el = this.$refs.messageInput;
+        el.style.height = "auto";
+        el.focus();
+      }
     },
 
     sendShortcut(name) {
@@ -349,15 +397,21 @@ document.addEventListener("alpine:init", () => {
     },
 
     async sendToSession(text) {
-      await fetch(
-        `/api/v1/sessions/${this.activeSession}/input`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text }),
-        }
-      );
-      this._triggerPoll();
+      try {
+        const resp = await fetch(
+          `/api/v1/sessions/${this.activeSession}/input`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text }),
+          }
+        );
+        if (!resp.ok) return false;
+        this._triggerPoll();
+        return true;
+      } catch {
+        return false;
+      }
     },
 
     async selectOption(itemNumber, isFreeform) {
@@ -709,6 +763,86 @@ document.addEventListener("alpine:init", () => {
         );
         if (el) htmx.trigger(el, "poll");
       }, 100);
+    },
+
+    // --- Push notifications ---
+
+    async _initPushState() {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        this._pushSubscription = sub;
+        if (sub) {
+          const resp = await fetch(
+            `/api/v1/notifications/subscriptions?endpoint=${encodeURIComponent(sub.endpoint)}`
+          );
+          if (resp.ok) {
+            const ids = await resp.json();
+            this._notifiedSessions = new Set(ids);
+          }
+        }
+      } catch {
+        // Push not available
+      }
+    },
+
+    async toggleNotification() {
+      if (!this.activeSession) return;
+      const sid = this.activeSession;
+
+      try {
+        // Ensure we have a push subscription
+        if (!this._pushSubscription) {
+          const perm = await Notification.requestPermission();
+          if (perm !== "granted") return;
+
+          const resp = await fetch("/api/v1/notifications/vapid-key");
+          const { public_key } = await resp.json();
+          const reg = await navigator.serviceWorker.ready;
+          const sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: public_key,
+          });
+          this._pushSubscription = sub;
+        }
+
+        const sub = this._pushSubscription;
+        const key = sub.getKey("p256dh");
+        const auth = sub.getKey("auth");
+        const p256dh = btoa(String.fromCharCode(...new Uint8Array(key)));
+        const authStr = btoa(String.fromCharCode(...new Uint8Array(auth)));
+
+        if (this._notifiedSessions.has(sid)) {
+          // Unsubscribe
+          await fetch("/api/v1/notifications/unsubscribe", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              endpoint: sub.endpoint,
+              session_id: sid,
+            }),
+          });
+          this._notifiedSessions.delete(sid);
+          // Force Alpine reactivity
+          this._notifiedSessions = new Set(this._notifiedSessions);
+        } else {
+          // Subscribe
+          await fetch("/api/v1/notifications/subscribe", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              endpoint: sub.endpoint,
+              p256dh: p256dh,
+              auth: authStr,
+              session_id: sid,
+            }),
+          });
+          this._notifiedSessions.add(sid);
+          this._notifiedSessions = new Set(this._notifiedSessions);
+        }
+      } catch (err) {
+        console.error("Push notification toggle failed:", err);
+      }
     },
 
     async pasteImage(event) {

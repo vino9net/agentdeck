@@ -13,11 +13,19 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import (
     BaseHTTPMiddleware,
 )
+from starlette.responses import FileResponse
 from starlette.templating import Jinja2Templates
 
 from agentdeck.api import sessions as sessions_routes
 from agentdeck.api.router import api_router
 from agentdeck.config import get_settings
+from agentdeck.notifications.push import PushNotifier
+from agentdeck.notifications.store import (
+    PushSubscriptionStore,
+)
+from agentdeck.notifications.vapid import (
+    load_or_create_vapid_keys,
+)
 from agentdeck.sessions.agent_output_log import (
     AgentOutputLog,
 )
@@ -27,6 +35,9 @@ from agentdeck.sessions.manager import (
 from agentdeck.sessions.models import AgentType
 from agentdeck.sessions.tmux_backend import (
     TmuxBackend,
+)
+from agentdeck.sessions.ui_state_detector import (
+    UIStateDetector,
 )
 
 logger = structlog.get_logger()
@@ -75,10 +86,35 @@ STATIC_DIR = PKG_DIR / "static"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
-async def _capture_loop(mgr: SessionManager) -> None:
-    """Background task: capture scrollback for all sessions."""
+async def _send_push(
+    notifier: PushNotifier,
+    sid: str,
+    state: str,
+    public_url: str,
+) -> None:
+    """Fire-and-forget push delivery in a thread."""
+    try:
+        await asyncio.to_thread(
+            notifier.check_and_notify,
+            sid,
+            state,
+            public_url,
+        )
+    except Exception:
+        logger.debug("push_send_failed", session_id=sid)
+
+
+async def _capture_loop(
+    mgr: SessionManager,
+    tmux: TmuxBackend | None = None,
+    notifier: PushNotifier | None = None,
+    public_url: str = "",
+) -> None:
+    """Background task: capture scrollback + push notify."""
     settings = get_settings()
     interval = settings.capture_interval_s
+    detector = UIStateDetector()
+    prev_pane: dict[str, str] = {}
     while True:
         await asyncio.sleep(interval)
         for sid in mgr.active_session_ids():
@@ -86,6 +122,29 @@ async def _capture_loop(mgr: SessionManager) -> None:
                 await mgr.capture_to_log(sid)
             except Exception:
                 logger.debug("capture_failed", session_id=sid)
+                continue
+
+            if notifier is None or tmux is None:
+                continue
+            try:
+                pane = await asyncio.to_thread(tmux.capture_pane, sid)
+                combined = prev_pane.get(sid, "") + "\n" + pane
+                tail = "\n".join(combined.split("\n")[-20:])
+                parsed = detector.parse(tail)
+                prev_pane[sid] = pane
+                asyncio.create_task(
+                    _send_push(
+                        notifier,
+                        sid,
+                        parsed.state,
+                        public_url,
+                    )
+                )
+            except Exception:
+                logger.debug(
+                    "notify_check_failed",
+                    session_id=sid,
+                )
 
 
 @asynccontextmanager
@@ -142,11 +201,36 @@ async def lifespan(
             ended_at=output_log.latest_ts(sid),
         )
 
+    # Push notifications
+    push_store = PushSubscriptionStore(settings.push_subs_path)
+    try:
+        vapid_public_key, vapid_pem = load_or_create_vapid_keys(settings.state_dir)
+        notifier: PushNotifier | None = PushNotifier(
+            store=push_store,
+            vapid_private_key_path=vapid_pem,
+            vapid_claims={"sub": "mailto:admin@localhost"},
+        )
+        app.state.vapid_public_key = vapid_public_key
+        logger.info("push_notifications_enabled")
+    except Exception:
+        logger.warning("push_notifications_disabled")
+        notifier = None
+        app.state.vapid_public_key = ""
+    app.state.push_store = push_store
+    app.state.push_notifier = notifier
+
     # Share templates with modules that need them
     sessions_routes.templates = templates
 
     # Start background output capture
-    capture_task = asyncio.create_task(_capture_loop(mgr))
+    capture_task = asyncio.create_task(
+        _capture_loop(
+            mgr,
+            tmux=tmux,
+            notifier=notifier,
+            public_url=settings.agentdeck_url,
+        )
+    )
 
     yield
 
@@ -201,6 +285,19 @@ def _load_snippets(state_dir: str) -> dict:
         return {"global": [], "directories": {}}
 
 
+@app.get("/sw.js")
+async def service_worker() -> FileResponse:
+    """Serve service worker from root scope."""
+    return FileResponse(
+        STATIC_DIR / "sw.js",
+        media_type="application/javascript",
+        headers={
+            "Cache-Control": "no-cache",
+            "Service-Worker-Allowed": "/",
+        },
+    )
+
+
 @app.get("/")
 async def index(request: Request):  # type: ignore[no-untyped-def]
     """Serve the main PWA page."""
@@ -217,5 +314,6 @@ async def index(request: Request):  # type: ignore[no-untyped-def]
             "default_working_dir": settings.default_working_dir,
             "session_refresh_ms": settings.session_refresh_ms,
             "prompt_snippets": snippets,
+            "public_url": settings.agentdeck_url,
         },
     )
