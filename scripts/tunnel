@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+
+#
+# this macOS scripts is for starting/stopping cloudflare tunnel service
+# once it has been installed. for details check official documentation:
+#
+#  https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/
+#
+
+set -euo pipefail
+
+LABEL="com.cloudflare.cloudflared"
+PLIST="/Library/LaunchDaemons/com.cloudflare.cloudflared.plist"
+
+usage() {
+  echo "Usage: tunnel {start|stop|enable|disable|restart|status}"
+  exit 1
+}
+
+need_sudo() {
+  if [[ $EUID -ne 0 ]]; then
+    exec sudo "$0" "$@"
+  fi
+}
+
+is_loaded() {
+  launchctl print "system/$LABEL" >/dev/null 2>&1
+}
+
+case "${1:-}" in
+  start)
+    need_sudo start
+    if ! is_loaded; then
+      launchctl bootstrap system "$PLIST"
+    fi
+    launchctl kickstart -k "system/$LABEL"
+    ;;
+
+  stop)
+    need_sudo stop
+    # Bring the tunnel down now without unloading the service.
+    # If KeepAlive is enabled, launchd may restart it.
+    launchctl kill SIGTERM "system/$LABEL" 2>/dev/null || true
+    ;;
+
+  enable)
+    need_sudo enable
+    if ! is_loaded; then
+      launchctl bootstrap system "$PLIST"
+    fi
+    ;;
+
+  disable)
+    need_sudo disable
+    # Unloads from launchd so it stays down until re-enabled.
+    launchctl bootout "system/$LABEL" 2>/dev/null || true
+    ;;
+
+  restart)
+    need_sudo restart
+    # Restart without unloading; if not loaded, load it.
+    if ! is_loaded; then
+      launchctl bootstrap system "$PLIST"
+    fi
+    launchctl kickstart -k "system/$LABEL"
+    ;;
+
+  status)
+    if launchctl print "system/$LABEL" 2>/dev/null \
+        | grep -q 'state = running'; then
+      echo "cloudflared: running"
+    else
+      echo "cloudflared: stopped"
+    fi
+    ;;
+
+  *)
+    usage
+    ;;
+esac

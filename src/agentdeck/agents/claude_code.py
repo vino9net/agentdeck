@@ -21,9 +21,7 @@ SHORTCUTS: dict[str, tuple[str, bool]] = {
 # (text, send_enter, need_confirmation, show_nav)
 SLASH_COMMANDS: list[SlashCommand] = [
     ("/clear", True, True, False),
-    ("/config", True, False, True),
     ("/context", True, False, False),
-    ("/compact", True, True, False),
     ("/model", True, False, True),
 ]
 

@@ -171,16 +171,21 @@ document.addEventListener("alpine:init", () => {
         const target = this.$refs.terminalScroll;
         if (!target) return;
 
+        let lastClientH = target.clientHeight;
         target.addEventListener("scroll", () => {
           const gap =
             target.scrollHeight -
             target.scrollTop -
             target.clientHeight;
-          // Skip re-pin when a manual jump just
-          // happened (jumpToPrevPrompt sets this)
+          const resized =
+            target.clientHeight !== lastClientH;
+          lastClientH = target.clientHeight;
+          // Skip _pinned update on resize-triggered
+          // scrolls (keyboard open/close, textarea
+          // shrink) and manual prompt jumps.
           if (this._jumpGuard) {
             this._jumpGuard = false;
-          } else {
+          } else if (!resized) {
             this._pinned = gap < 50;
           }
           this._nearTop = target.scrollTop < 100;
@@ -245,6 +250,10 @@ document.addEventListener("alpine:init", () => {
       this.refreshSessions();
       this.refreshRecentDirs();
       this.refreshSlashCommands();
+
+      // UI behaviour flags
+      this._confirmImageUpload =
+        this.$el.dataset.confirmImageUpload === "true";
 
       // Push notifications
       this._publicUrl = this.$el.dataset.publicUrl || "";
@@ -384,6 +393,7 @@ document.addEventListener("alpine:init", () => {
       }
       const ok = await this.sendToSession(text);
       if (ok) {
+        this._pinned = true;
         this.inputText = "";
         const el = this.$refs.messageInput;
         el.style.height = "auto";
@@ -848,7 +858,10 @@ document.addEventListener("alpine:init", () => {
     async pasteImage(event) {
       const file = event.target.files?.[0];
       if (!file || !this.activeSession) return;
-      if (!window.confirm("Send image to agent?")) {
+      if (
+        this._confirmImageUpload &&
+        !window.confirm("Send image to agent?")
+      ) {
         event.target.value = "";
         return;
       }

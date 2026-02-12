@@ -315,5 +315,6 @@ async def index(request: Request):  # type: ignore[no-untyped-def]
             "session_refresh_ms": settings.session_refresh_ms,
             "prompt_snippets": snippets,
             "public_url": settings.agentdeck_url,
+            "confirm_image_upload": settings.confirm_image_upload,
         },
     )

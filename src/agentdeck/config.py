@@ -9,7 +9,7 @@ class Settings(BaseSettings):
 
     # API
     app_name: str = "agentdeck"
-    app_version: str = "0.9.4"
+    app_version: str = "0.9.6"
 
     # tmux
     tmux_pane_width: int = 160
@@ -28,6 +28,9 @@ class Settings(BaseSettings):
 
     # Push notifications
     agentdeck_url: str = "http://127.0.0.1"
+
+    # UI behaviour
+    confirm_image_upload: bool = False
 
     @computed_field  # type: ignore[prop-decorator]
     @property
