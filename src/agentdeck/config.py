@@ -9,7 +9,7 @@ class Settings(BaseSettings):
 
     # API
     app_name: str = "agentdeck"
-    app_version: str = "0.9.6"
+    app_version: str = "0.9.7"
 
     # tmux
     tmux_pane_width: int = 160

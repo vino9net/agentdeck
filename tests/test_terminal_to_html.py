@@ -220,6 +220,45 @@ def test_headless_panel_strips_box_drawing():
         assert ch not in result
 
 
+# ── ASCII table (tabulate "grid" format) ────────────────────
+
+
+ASCII_TABLE = """\
++----------------------------+--------+-----------+--------+
+| Filing                     | Recall | Precision | F1     |
++============================+========+===========+========+
+| 0000881773-20-000006       | 8.3%   | 4.3%      | 100.0% |
+| 0000827060-15-000011       | 22.2%  | 12.5%     | 100.0% |
++----------------------------+--------+-----------+--------+"""
+
+
+def test_ascii_table_converted_to_html():
+    """ASCII +/-/| tables (e.g. tabulate grid) render like Unicode ones."""
+    result = str(_terminal_to_html(ASCII_TABLE))
+    assert '<table class="terminal-table">' in result
+    assert "<th>Filing</th>" in result
+    assert "<td>8.3%</td>" in result
+    assert "+---" not in result
+
+
+# ── Headless table (top border in a previous chunk) ─────────
+
+
+HEADLESS_TABLE_CHUNK = """\
+  │ 1   │ 0000928816-17-002437 │ 0.0%  │ 0.0%   │
+  ├─────┼──────────────────────┼───────┼────────┤
+  │ 2   │ 0000940394-15-001351 │ 0.0%  │ 0.0%   │
+  ├─────┼──────────────────────┼───────┼────────┤"""
+
+
+def test_headless_table_renders_as_table():
+    """Table rows without top border (split across chunks)."""
+    result = str(_terminal_to_html(HEADLESS_TABLE_CHUNK))
+    assert '<table class="terminal-table">' in result
+    assert "<td>0000928816-17-002437</td>" in result
+    assert "<thead>" not in result  # no fake header
+
+
 # ── Plain text passthrough ───────────────────────────────────
 
 

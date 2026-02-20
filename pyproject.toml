@@ -1,6 +1,6 @@
 [project]
 name = "agentdeck"
-version = "0.9.6"
+version = "0.9.7"
 description = "Server for remote access to coding agents on local machine"
 requires-python = ">=3.13"
 dependencies = [

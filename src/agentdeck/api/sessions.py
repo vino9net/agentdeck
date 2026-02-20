@@ -44,10 +44,10 @@ _STATUS_BAR_RE = re.compile(
     r"|shift\+tab to cycle)"
 )
 
-# Box-drawing detection patterns
-_TABLE_TOP_RE = re.compile(r"^[│┌][─┬]+[┐│]?\s*$")
-_TABLE_SEP_RE = re.compile(r"^[│├][─┼]+[┤│]?\s*$")
-_TABLE_BOT_RE = re.compile(r"^[│└][─┴]+[┘│]?\s*$")
+# Box-drawing AND ASCII table detection patterns
+_TABLE_TOP_RE = re.compile(r"^[│┌|+][─┬+|\-]+[┐│|+]?\s*$")
+_TABLE_SEP_RE = re.compile(r"^[│├|+][─┼+=|\-]+[┤│|+]?\s*$")
+_TABLE_BOT_RE = re.compile(r"^[│└|+][─┴+|\-]+[┘│|+]?\s*$")
 _PANEL_TOP_RE = re.compile(r"^[╭┌][─]+[╮┐]\s*$")
 _PANEL_BOT_RE = re.compile(r"^[╰└][─]+[╯┘]\s*$")
 _PANEL_MID_RE = re.compile(r"^│(.*)│\s*$")
@@ -60,39 +60,61 @@ def _escape_cell(text: str) -> str:
 
 
 def _split_table_row(line: str) -> list[str]:
-    """Split a table data row by │ separators."""
+    """Split a table data row by │ or | separators."""
     stripped = line.strip()
-    if stripped.startswith("│"):
-        stripped = stripped[1:]
-    if stripped.endswith("│"):
-        stripped = stripped[:-1]
-    return [cell.strip() for cell in stripped.split("│")]
+    sep = "│" if "│" in stripped else "|"
+    if stripped.startswith(sep):
+        stripped = stripped[len(sep) :]
+    if stripped.endswith(sep):
+        stripped = stripped[: -len(sep)]
+    return [cell.strip() for cell in stripped.split(sep)]
 
 
-def _render_table(lines: list[str]) -> str:
-    """Convert box-drawing table lines to an HTML table."""
+def _is_table_data_row(line: str) -> bool:
+    """Multi-column data row (│ a │ b │) — not a single-column panel."""
+    s = line.strip()
+    for sep in ("│", "|"):
+        if s.startswith(sep) and s.endswith(sep):
+            inner = s[1:-1]
+            if inner.count(sep) >= 1:
+                return True
+    return False
+
+
+def _is_table_border(line: str) -> bool:
+    s = line.strip()
+    return bool(_TABLE_SEP_RE.match(s) or _TABLE_BOT_RE.match(s))
+
+
+def _render_table(
+    lines: list[str],
+    *,
+    headerless: bool = False,
+) -> str:
+    """Convert box-drawing or ASCII table lines to HTML."""
     rows: list[list[str]] = []
     for line in lines:
         s = line.strip()
         # Skip border/separator lines
         if _TABLE_TOP_RE.match(s) or _TABLE_SEP_RE.match(s) or _TABLE_BOT_RE.match(s):
             continue
-        if "│" in s:
+        if "│" in s or "|" in s:
             rows.append(_split_table_row(s))
 
     if not rows:
         return ""
 
     parts = ['<table class="terminal-table">']
-    # First row is header
-    parts.append("<thead><tr>")
-    for cell in rows[0]:
-        parts.append(f"<th>{_escape_cell(cell)}</th>")
-    parts.append("</tr></thead>")
-    # Remaining rows are body
-    if len(rows) > 1:
+    first = 0
+    if not headerless:
+        parts.append("<thead><tr>")
+        for cell in rows[0]:
+            parts.append(f"<th>{_escape_cell(cell)}</th>")
+        parts.append("</tr></thead>")
+        first = 1
+    if first < len(rows):
         parts.append("<tbody>")
-        for row in rows[1:]:
+        for row in rows[first:]:
             parts.append("<tr>")
             for cell in row:
                 parts.append(f"<td>{_escape_cell(cell)}</td>")
@@ -124,7 +146,15 @@ def _render_panel(lines: list[str]) -> str:
 
 def _is_table_top(line: str) -> bool:
     s = line.strip()
-    return bool(_TABLE_TOP_RE.match(s)) and "┬" in s
+    if not _TABLE_TOP_RE.match(s):
+        return False
+    # Must have dashes (not just separator chars like +++)
+    if "─" not in s and "-" not in s:
+        return False
+    # Must have interior column separators (distinguishes
+    # tables from single-column panels)
+    inner = s[1:-1] if len(s) > 2 else s
+    return "┬" in inner or "+" in inner or "|" in inner
 
 
 def _is_panel_top(line: str) -> bool:
@@ -132,27 +162,40 @@ def _is_panel_top(line: str) -> bool:
     return bool(_PANEL_TOP_RE.match(s)) and "┬" not in s
 
 
+def _collect_table_block(lines: list[str], start: int) -> tuple[list[str], int]:
+    """Collect consecutive table lines starting at *start*.
+
+    Returns (block, next_index).
+    """
+    block = [lines[start]]
+    j = start + 1
+    while j < len(lines):
+        s = lines[j].strip()
+        is_border = bool(
+            _TABLE_TOP_RE.match(s) or _TABLE_SEP_RE.match(s) or _TABLE_BOT_RE.match(s)
+        )
+        is_row = s.startswith("│") or s.startswith("|")
+        if not is_border and not is_row:
+            break
+        block.append(lines[j])
+        j += 1
+    return block, j
+
+
 def _convert_blocks(lines: list[str]) -> list[str]:
-    """Scan lines for box-drawing blocks, convert to HTML."""
+    """Scan lines for table/panel blocks, convert to HTML."""
     result: list[str] = []
     i = 0
     while i < len(lines):
         line = lines[i]
         # Check for multi-column table start
         if _is_table_top(line):
-            block = [line]
-            j = i + 1
-            while j < len(lines):
-                block.append(lines[j])
-                if _TABLE_BOT_RE.match(lines[j].strip()):
-                    break
-                j += 1
+            block, i = _collect_table_block(lines, i)
             rendered = _render_table(block)
             if rendered:
                 result.append(rendered)
             else:
                 result.extend(html.escape(ln) for ln in block)
-            i = j + 1
             continue
 
         # Check for panel start
@@ -167,6 +210,17 @@ def _convert_blocks(lines: list[str]) -> list[str]:
             result.append(_render_panel(block))
             i = j + 1
             continue
+
+        # Headless table: multi-column │ a │ b │ rows without
+        # a top border (top border was in a previous chunk)
+        if _is_table_data_row(line) or _is_table_border(line):
+            block, j = _collect_table_block(lines, i)
+            rendered = _render_table(block, headerless=True)
+            if rendered:
+                result.append(rendered)
+                i = j
+                continue
+            # Not a table — fall through
 
         # Headless panel: │...│ lines without a top border
         # (top border was in a previous chunk)

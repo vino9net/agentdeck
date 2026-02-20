@@ -9,7 +9,7 @@
 /* Horizontal rules inside terminal output */
 .terminal-hr {
     border: none;
-    border-top: 1px solid oklch(var(--color-base-content) / 0.2);
+    border-top: 1px solid color-mix(in oklch, var(--color-base-content) 20%, transparent);
     margin: 0;
 }
 
@@ -24,19 +24,19 @@
 .terminal-table th,
 .terminal-table td {
     padding: 0.25rem 0.5rem;
-    border: 1px solid oklch(var(--color-base-content) / 0.15);
+    border: 1px solid color-mix(in oklch, var(--color-base-content) 40%, transparent);
     text-align: left;
     white-space: normal;
     overflow-wrap: break-word;
 }
 .terminal-table th {
     font-weight: 600;
-    background: oklch(var(--color-base-200));
+    background: var(--color-base-200);
 }
 
 /* Panels from box-drawing conversion */
 .terminal-panel {
-    border: 1px solid oklch(var(--color-base-content) / 0.2);
+    border: 1px solid color-mix(in oklch, var(--color-base-content) 20%, transparent);
     border-radius: 0.5rem;
     padding: 0.5rem 0.75rem;
     margin: 0.5rem 0;
@@ -68,7 +68,7 @@ textarea.textarea {
 }
 
 .history-chunk {
-    border-bottom: 1px solid oklch(var(--color-base-content) / 0.08);
+    border-bottom: 1px solid color-mix(in oklch, var(--color-base-content) 8%, transparent);
 }
 
 /* Mobile-friendly touch targets (44px = Apple HIG minimum) */

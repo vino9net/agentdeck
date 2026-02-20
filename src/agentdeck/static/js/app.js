@@ -277,8 +277,24 @@ document.addEventListener("alpine:init", () => {
           (s) => s.session_id === restored
         )
       ) {
-        this.switchSession(restored);
+        this._restoreSession(restored);
       }
+
+      // Reload page when returning after 10 s away
+      let hiddenAt = null;
+      document.addEventListener(
+        "visibilitychange",
+        () => {
+          if (document.visibilityState === "hidden") {
+            hiddenAt = Date.now();
+          } else if (
+            hiddenAt &&
+            Date.now() - hiddenAt > 10_000
+          ) {
+            location.reload();
+          }
+        }
+      );
     },
 
     async refreshSessions() {
@@ -316,17 +332,14 @@ document.addEventListener("alpine:init", () => {
     },
 
     switchSession(sessionId) {
-      // Clear history state
-      this.historyChunks = [];
-      this.earliestTs = null;
-      this.historyExhausted = false;
-      this.historyLoading = false;
-      if (this._historyObserver) {
-        this._historyObserver.disconnect();
-        this._historyObserver = null;
-      }
+      const url = new URL(window.location);
+      url.searchParams.set("session", sessionId);
+      window.location.href = url.toString();
+    },
 
-      // Null first to force x-if to destroy and recreate
+    // Client-side restore used on initial page load
+    // (URL already has ?session=...).
+    _restoreSession(sessionId) {
       this.activeSession = null;
       this.$nextTick(() => {
         this.activeSession = sessionId;
@@ -334,12 +347,12 @@ document.addEventListener("alpine:init", () => {
         this.$nextTick(async () => {
           await this.loadHistory(sessionId, null);
           this._setupHistoryObserver();
+          // Scroll to bottom after initial load
+          this._pinned = true;
+          const t = this.$refs.terminalScroll;
+          if (t) t.scrollTop = t.scrollHeight;
         });
       });
-      // Persist to URL so refresh restores the session
-      const url = new URL(window.location);
-      url.searchParams.set("session", sessionId);
-      history.replaceState(null, "", url);
     },
 
     async killSession(sessionId) {
