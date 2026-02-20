@@ -1,6 +1,6 @@
 ---
 name: release
-description: Run the release process — bump version, review staged changes, and summarize
+description: Run the release process — review staged changes, and summarize
 disable-model-invocation: false
 ---
 
