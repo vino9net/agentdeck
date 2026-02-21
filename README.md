@@ -3,7 +3,7 @@
 Your coding agents don't stop working just because you left your desk.
 This is a lightweight server that lets you monitor and interact with
 AI coding agents (Claude Code, Codex, etc.) running on your dev machine —
-from your phone, tablet, or that questionable airport WiFi.
+from your phone, tablet, even or that questionable airport WiFi.
 
 Because sometimes you need to approve a file edit while waiting for
 your coffee.
