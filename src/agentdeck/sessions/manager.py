@@ -574,17 +574,11 @@ class SessionManager:
     def _load_recent_dirs(self) -> list[str]:
         if not self._recent_dirs_path.exists():
             return []
-        data = self._recent_dirs_path.read_text().splitlines()
-        home = str(Path.home())
-        result: list[str] = []
-        for line in data:
-            stripped = line.strip()
-            if not stripped:
-                continue
-            if stripped.startswith(home):
-                stripped = "~" + stripped[len(home) :]
-            result.append(stripped)
-        return result
+        return [
+            line.strip()
+            for line in self._recent_dirs_path.read_text().splitlines()
+            if line.strip()
+        ]
 
     async def send_debug_prompt(
         self,

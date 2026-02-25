@@ -1,5 +1,6 @@
 """Tests for SessionManager with mocked TmuxBackend."""
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -29,19 +30,19 @@ def output_log(tmp_path):
 
 @pytest.fixture()
 def manager(mock_tmux, tmp_path):
-    recent_path = tmp_path / "recent_dirs.txt"
+    recent_dirs_path = tmp_path / "recent_dirs.txt"
     return SessionManager(
         tmux=mock_tmux,
-        recent_dirs_path=recent_path,
+        recent_dirs_path=recent_dirs_path,
     )
 
 
 @pytest.fixture()
 def manager_with_log(mock_tmux, tmp_path, output_log):
-    recent_path = tmp_path / "recent_dirs.txt"
+    recent_dirs_path = tmp_path / "recent_dirs.txt"
     return SessionManager(
         tmux=mock_tmux,
-        recent_dirs_path=recent_path,
+        recent_dirs_path=recent_dirs_path,
         output_log=output_log,
     )
 
@@ -112,6 +113,23 @@ async def test_capture_output(manager, mock_tmux, tmp_path):
 async def test_unknown_session_raises(manager):
     with pytest.raises(KeyError, match="Unknown"):
         await manager.send_input("fake-id", "hello")
+
+
+def test_record_recent_dir_persists_to_text_file(tmp_path, mock_tmux):
+    """Recent dirs are stored in a separate text file, not config.json."""
+    recent_dirs_path = tmp_path / "recent_dirs.txt"
+    recent_dirs_path.write_text("~/old\n")
+    mgr = SessionManager(
+        tmux=mock_tmux,
+        recent_dirs_path=recent_dirs_path,
+    )
+
+    workdir = str(Path.home() / "repo")
+    mgr._record_recent_dir(workdir)
+
+    lines = recent_dirs_path.read_text().splitlines()
+    assert lines[0] == "~/repo"
+    assert lines[1] == "~/old"
 
 
 SELECTION_OUTPUT = """\

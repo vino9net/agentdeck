@@ -55,6 +55,37 @@ def _infer_agent_type(session_id: str) -> AgentType:
     return AgentType.CLAUDE
 
 
+def _normalize_whitelist_dirs(paths: list[str]) -> list[Path]:
+    """Normalize configured whitelist directories."""
+    normalized: list[Path] = []
+    for raw in paths:
+        if not raw or not raw.strip():
+            continue
+        try:
+            path = Path(raw).expanduser().resolve()
+        except Exception:
+            logger.warning("invalid_rehydrate_whitelist_dir", path=raw)
+            continue
+        normalized.append(path)
+    return normalized
+
+
+def _is_whitelisted_session_dir(
+    working_dir: str | None,
+    whitelist_dirs: list[Path],
+) -> bool:
+    """True when working_dir is equal to or under a whitelist dir."""
+    if not whitelist_dirs:
+        return True
+    if not working_dir:
+        return False
+    try:
+        path = Path(working_dir).expanduser().resolve()
+    except Exception:
+        return False
+    return any(path == allowed or allowed in path.parents for allowed in whitelist_dirs)
+
+
 class _SamplePollingAccess(logging.Filter):
     """Show only 1-in-N access log lines for output polling."""
 
@@ -154,6 +185,7 @@ async def lifespan(
     settings = get_settings()
     _install_access_log_filter()
     logger.info("starting_up", version=settings.app_version)
+    rehydrate_whitelist = _normalize_whitelist_dirs(settings.rehydrate_dir_whitelist)
 
     tmux = TmuxBackend(
         pane_width=settings.tmux_pane_width,
@@ -163,13 +195,13 @@ async def lifespan(
 
     state_dir = Path(settings.state_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
-    recent_dirs_path = state_dir / "recent_dirs.txt"
 
     output_log = AgentOutputLog(settings.db_path)
 
     mgr = SessionManager(
         tmux=tmux,
-        recent_dirs_path=recent_dirs_path,
+        recent_dirs=settings.recent_dirs,
+        state_config_path=state_dir / "config.json",
         output_log=output_log,
         capture_tail_lines=settings.capture_tail_lines,
     )
@@ -183,13 +215,27 @@ async def lifespan(
         if not session_id.startswith("agent-"):
             continue
         working_dir = await asyncio.to_thread(tmux.get_session_path, session_id)
+        if not _is_whitelisted_session_dir(working_dir, rehydrate_whitelist):
+            logger.info(
+                "rehydrate_session_skipped_not_whitelisted",
+                session_id=session_id,
+                working_dir=working_dir,
+            )
+            continue
         agent_type = _infer_agent_type(session_id)
+        final_dir = working_dir or settings.default_working_dir
         mgr.register_existing_session(
             session_id=session_id,
-            working_dir=(working_dir or settings.default_working_dir),
+            working_dir=final_dir,
             agent_type=agent_type,
         )
         live_ids.add(session_id)
+        logger.info(
+            "rehydrate_session",
+            session_id=session_id,
+            working_dir=final_dir,
+            agent_type=agent_type.value,
+        )
 
     # Rehydrate dead sessions from output log
     for sid in output_log.session_ids():

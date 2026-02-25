@@ -97,8 +97,8 @@ def test_dir():
 @pytest.fixture()
 def manager(tmux_backend, test_dir):
     """Create a real SessionManager."""
-    recent_path = test_dir / "recent_dirs.txt"
-    return SessionManager(tmux=tmux_backend, recent_dirs_path=recent_path)
+    recent_dirs_path = test_dir / "recent_dirs.txt"
+    return SessionManager(tmux=tmux_backend, recent_dirs_path=recent_dirs_path)
 
 
 # ── Lifecycle tests ──────────────────────────────────────
