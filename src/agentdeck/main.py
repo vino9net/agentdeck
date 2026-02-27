@@ -200,8 +200,7 @@ async def lifespan(
 
     mgr = SessionManager(
         tmux=tmux,
-        recent_dirs=settings.recent_dirs,
-        state_config_path=state_dir / "config.json",
+        recent_dirs_path=state_dir / "recent_dirs.txt",
         output_log=output_log,
         capture_tail_lines=settings.capture_tail_lines,
     )
